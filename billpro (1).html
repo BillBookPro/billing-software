@@ -1,3416 +1,581 @@
-<!doctype html>
-<html lang="en">
-
+<!DOCTYPE html>
+<html lang="hi">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>BillPro</title>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
-  <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
-
-  <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-    import {
-      getAuth,
-      createUserWithEmailAndPassword,
-      signInWithEmailAndPassword,
-      sendPasswordResetEmail,
-      onAuthStateChanged,
-      signOut
-    } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-    import {
-      getFirestore,
-      doc,
-      setDoc,
-      getDoc,
-      onSnapshot,
-      collection,
-      query,
-      where,
-      getDocs
-    } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-
-    const firebaseConfig = {
-      apiKey: "AIzaSyBy8UEKBowJP1Vp4QHO4asjPxmgq_UfODM",
-      authDomain: "bill-book-pro-93155.firebaseapp.com",
-      projectId: "bill-book-pro-93155",
-      storageBucket: "bill-book-pro-93155.firebasestorage.app",
-      messagingSenderId: "409759386921",
-      appId: "1:409759386921:web:886bb07870ab756ba67b38",
-      measurementId: "G-XFRTME6Z4R"
-    };
-
-    const app = initializeApp(firebaseConfig);
-    const auth = getAuth(app);
-    const db = getFirestore(app);
-
-    window._fbAuth = auth;
-    window._fbDb = db;
-    window._fbFns = {
-      createUserWithEmailAndPassword,
-      signInWithEmailAndPassword,
-      sendPasswordResetEmail,
-      onAuthStateChanged,
-      signOut,
-      doc,
-      setDoc,
-      getDoc,
-      onSnapshot,
-      collection,
-      query,
-      where,
-      getDocs
-    };
-
-    onAuthStateChanged(auth, async (user) => {
-      if (localStorage.getItem('emp_session_admin_uid')) {
-        await loadEmployeeSession();
-        return;
-      }
-
-      if (user) {
-        currentUser = user.uid;
-        window._fbCurrentEmail = user.email;
-        await window._fbLoadStore();
-        if (!store.adminEmail || store.adminEmail !== user.email) {
-          store.adminEmail = user.email;
-          saveData();
-        }
-        invoiceCounters = loadInvoiceCounters();
-        document.body.classList.remove('auth-locked');
-        document.getElementById('current-user-label').textContent = user.email;
-        updateProductList();
-        renderDashboard();
-        updateEmployeesNavUI();
-      } else {
-        currentUser = null;
-        window._fbCurrentEmail = null;
-        store = structuredClone(defaultStore);
-        document.body.classList.add('auth-locked');
-        setAuthMode('login');
-      }
-    });
-  </script>
-
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>Barcode Scanner</title>
+  <script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.20.0/umd/index.min.js"></script>
   <style>
-    :root {
-      --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      --bg: #eef2f6;
-      --panel: #ffffff;
-      --panel-soft: #f7f9fb;
-      --text: #182230;
-      --muted: #667085;
-      --faint: #98a2b3;
-      --line: #d9e1ea;
-      --line-soft: #edf1f5;
-      --blue: #1663a6;
-      --blue-dark: #0c477c;
-      --green: #14845f;
-      --amber: #b86b12;
-      --red: #c43d3d;
-      --radius: 8px;
-      --shadow: 0 18px 44px rgba(24, 34, 48, .09);
-    }
-
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
-
+    * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      font-family: var(--font-sans);
-      background: var(--bg);
-      color: var(--text);
-      min-height: 100vh;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #0f1923; color: #fff;
+      min-height: 100vh; display: flex; flex-direction: column;
+    }
+    .header {
+      background: linear-gradient(135deg, #1663a6, #0c477c);
+      padding: 14px 18px; display: flex; align-items: center;
+      gap: 10px; box-shadow: 0 2px 12px rgba(0,0,0,0.3);
+    }
+    .header-icon { font-size: 24px; }
+    .header h1 { font-size: 17px; font-weight: 800; }
+    .header p  { font-size: 11px; opacity: 0.75; margin-top: 2px; }
+
+    .camera-wrap {
+      position: relative; width: 100%;
+      background: #000; flex-shrink: 0;
+    }
+    #video {
+      width: 100%; display: block;
+      height: 62vw; object-fit: cover;
+    }
+    .scan-overlay {
+      position: absolute; inset: 0; pointer-events: none;
+    }
+    .corner {
+      position: absolute; width: 28px; height: 28px;
+      border-color: #00ff88; border-style: solid; border-width: 0;
+    }
+    .corner.tl { top: 12px; left: 12px; border-top-width: 3px; border-left-width: 3px; border-radius: 4px 0 0 0; }
+    .corner.tr { top: 12px; right: 12px; border-top-width: 3px; border-right-width: 3px; border-radius: 0 4px 0 0; }
+    .corner.bl { bottom: 12px; left: 12px; border-bottom-width: 3px; border-left-width: 3px; border-radius: 0 0 0 4px; }
+    .corner.br { bottom: 12px; right: 12px; border-bottom-width: 3px; border-right-width: 3px; border-radius: 0 0 4px 0; }
+    .corner.found { border-color: #ffcc00; }
+
+    .laser {
+      position: absolute; left: 8px; right: 8px; height: 2px;
+      background: linear-gradient(90deg, transparent, #00ff88, transparent);
+      box-shadow: 0 0 8px #00ff88;
+      animation: laser-scan 1.8s ease-in-out infinite; top: 20%;
+    }
+    .laser.found {
+      background: linear-gradient(90deg, transparent, #ffcc00, transparent);
+      box-shadow: 0 0 8px #ffcc00; animation: none;
+    }
+    @keyframes laser-scan {
+      0%   { top: 15%; opacity: 0.9; }
+      50%  { top: 80%; opacity: 1; }
+      100% { top: 15%; opacity: 0.9; }
     }
 
-    button,
-    input,
-    select {
-      font: inherit;
-    }
-
-    button {
-      border: 0;
-    }
-
-    body.auth-locked .app {
+    /* Zoom indicator */
+    .zoom-badge {
+      position: absolute; bottom: 30px; left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0,0,0,0.6); color: #fff;
+      font-size: 12px; font-weight: 700;
+      padding: 4px 12px; border-radius: 20px;
       display: none;
     }
+    .zoom-badge.show { display: block; }
 
-    .auth-screen {
-      min-height: 100vh;
-      display: grid;
-      place-items: center;
-      padding: 24px;
-      position: relative;
-      overflow: hidden;
-      background:
-        radial-gradient(circle at 18% 18%, rgba(22, 99, 166, .18), transparent 28%),
-        radial-gradient(circle at 82% 22%, rgba(20, 132, 95, .16), transparent 26%),
-        linear-gradient(135deg, #eaf3ff 0%, #f4f8fc 48%, #e9f7f1 100%);
-    }
-
-    .auth-screen::before {
-      content: "";
-      position: absolute;
-      inset: 0;
-      background-image:
-        linear-gradient(rgba(22, 99, 166, .06) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(22, 99, 166, .06) 1px, transparent 1px);
-      background-size: 42px 42px;
-      mask-image: linear-gradient(90deg, transparent, #000 18%, #000 82%, transparent);
-      pointer-events: none;
-    }
-
-    .auth-screen::after {
-      content: "";
-      position: absolute;
-      width: 560px;
-      height: 560px;
-      border-radius: 50%;
-      left: 50%;
-      top: 50%;
-      transform: translate(-50%, -50%);
-      background: rgba(255, 255, 255, .48);
-      filter: blur(22px);
-      pointer-events: none;
-    }
-
-    body:not(.auth-locked) .auth-screen {
+    /* Torch button */
+    .torch-btn {
+      position: absolute; top: 8px; left: 10px;
+      background: rgba(0,0,0,0.55); border: none;
+      color: #fff; font-size: 18px;
+      padding: 4px 10px; border-radius: 20px;
+      cursor: pointer; z-index: 5;
       display: none;
     }
-
-    .auth-card {
-      width: min(420px, 100%);
-      position: relative;
-      z-index: 1;
-      background: rgba(255, 255, 255, .92);
-      border: 1px solid rgba(255, 255, 255, .74);
-      border-radius: 10px;
-      box-shadow: 0 28px 80px rgba(24, 34, 48, .16);
-      padding: 26px;
-      backdrop-filter: blur(14px);
-    }
-
-    .auth-card .logo {
-      margin-bottom: 16px;
-    }
-
-    .auth-card h1 {
-      font-size: 24px;
-      margin-bottom: 6px;
-    }
-
-    .auth-card p {
-      color: var(--muted);
-      font-size: 14px;
-      margin-bottom: 18px;
-    }
-
-    .auth-card .form-group {
-      margin-bottom: 12px;
-    }
-
-    .auth-actions {
-      display: flex;
-      gap: 10px;
-      margin-top: 16px;
-    }
-
-    .auth-actions .btn {
-      flex: 1;
-    }
-
-    .auth-hint {
-      margin-top: 14px;
-      color: var(--muted);
-      font-size: 12px;
-      line-height: 1.5;
-    }
-
-    .user-pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      min-height: 38px;
-      padding: 7px 11px;
-      border: 1px solid var(--line);
-      border-radius: 999px;
-      background: #fff;
-      color: var(--muted);
-      font-size: 13px;
-      font-weight: 750;
-    }
-
-    .app {
-      display: grid;
-      grid-template-columns: 248px minmax(0, 1fr);
-      min-height: 100vh;
-      background:
-        radial-gradient(circle at 35% 0%, rgba(22, 99, 166, .12), transparent 28%),
-        linear-gradient(135deg, #edf5fb 0%, #f7fafc 48%, #eef8f2 100%);
-    }
-
-    .sidebar {
-      background: linear-gradient(180deg, rgba(255, 255, 255, .96) 0%, rgba(238, 246, 255, .98) 42%, rgba(235, 249, 241, .96) 100%);
-      border-right: 1px solid rgba(22, 99, 166, .18);
-      display: flex;
-      flex-direction: column;
-      position: sticky;
-      top: 0;
-      height: 100vh;
-      box-shadow: 12px 0 34px rgba(24, 34, 48, .05);
-    }
-
-    .brand {
-      padding: 22px 20px 18px;
-      border-bottom: 1px solid rgba(22, 99, 166, .12);
-      background: linear-gradient(135deg, rgba(22, 99, 166, .08), rgba(20, 132, 95, .07));
-    }
-
-    .logo {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      font-size: 19px;
-      font-weight: 750;
-    }
-
-    .logo-mark {
-      width: 34px;
-      height: 34px;
-      display: grid;
-      place-items: center;
-      border-radius: 8px;
-      color: #fff;
-      background: var(--blue);
-      box-shadow: 0 10px 24px rgba(22, 99, 166, .22);
-    }
-
-    .logo span {
-      color: var(--blue);
-    }
-
-    .brand small {
-      display: block;
-      color: #4f6480;
-      margin-top: 5px;
-      font-size: 12px;
-    }
-
-    .nav {
-      padding: 14px 12px;
-    }
-
-    .nav-section {
-      padding: 16px 10px 7px;
-      font-size: 11px;
-      color: #6d7f99;
-      text-transform: uppercase;
-      font-weight: 700;
-    }
-
-    .nav-item {
-      width: 100%;
-      display: flex;
-      align-items: center;
-      gap: 11px;
-      min-height: 42px;
-      padding: 9px 11px;
-      color: #30435d;
-      background: transparent;
-      border-radius: var(--radius);
-      cursor: pointer;
-      text-align: left;
-      transition: background .16s, color .16s;
-    }
-
-    .nav-item i {
-      font-size: 20px;
-      width: 22px;
-      text-align: center;
-      color: #1f69aa;
-    }
-
-    .nav-item:hover {
-      background: rgba(255, 255, 255, .72);
-      color: #0f3560;
-      box-shadow: 0 8px 18px rgba(22, 99, 166, .08);
-    }
-
-    .nav-item.active {
-      background: linear-gradient(135deg, #dff0ff, #e8f8ee);
-      color: #075792;
-      font-weight: 700;
-      border: 1px solid rgba(22, 99, 166, .2);
-      box-shadow: 0 10px 24px rgba(22, 99, 166, .11);
-    }
-
-    .main {
-      min-width: 0;
-      display: flex;
-      flex-direction: column;
-      background:
-        linear-gradient(180deg, rgba(255, 255, 255, .64), rgba(255, 255, 255, 0) 180px),
-        radial-gradient(circle at 90% 8%, rgba(184, 107, 18, .11), transparent 20%),
-        transparent;
-    }
-
-    .topbar {
-      min-height: 72px;
-      padding: 14px 28px;
-      background: rgba(255, 255, 255, .9);
-      border-bottom: 1px solid rgba(22, 99, 166, .14);
-      backdrop-filter: blur(14px);
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      position: sticky;
-      top: 0;
-      z-index: 10;
-    }
-
-    .topbar h1 {
-      font-size: 22px;
-      font-weight: 760;
-    }
-
-    .topbar p {
-      margin-top: 3px;
-      font-size: 13px;
-      color: var(--muted);
-    }
-
-    .live-header-clock {
-      position: absolute;
-      left: 50%;
-      top: 50%;
-      transform: translate(-50%, -50%);
-      text-align: center;
-    }
-
-    #liveTime {
-      font-size: 34px;
-      font-weight: 900;
-      color: #1663a6;
-      line-height: 1;
-    }
-
-    #liveDate {
-      font-size: 14px;
-      font-weight: 600;
-      color: #666;
-      margin-top: 6px;
-    }
-
-    .content {
-      padding: 24px 28px 34px;
-      width: min(1360px, 100%);
-      min-height: calc(100vh - 72px);
-    }
-
-    .page {
-      display: none;
-    }
-
-    .page.active {
-      display: block;
-    }
-
-    .dashboard-grid {
-      display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 14px;
-      margin-bottom: 18px;
-    }
-
-    .stat-card {
-      position: relative;
-      background: var(--panel);
-      border: 1px solid rgba(255, 255, 255, .72);
-      border-radius: var(--radius);
-      padding: 16px;
-      overflow: hidden;
-      box-shadow: 0 16px 34px rgba(24, 34, 48, .08);
-    }
-
-    .stat-card::before {
-      content: "";
-      position: absolute;
-      inset: 0 auto 0 0;
-      width: 5px;
-      background: var(--accent, var(--blue));
-    }
-
-    .stat-card::after {
-      content: "";
-      position: absolute;
-      inset: 0;
-      background: linear-gradient(135deg, var(--tint, rgba(22, 99, 166, .1)), transparent 58%);
-      pointer-events: none;
-    }
-
-    .stat-card>* {
-      position: relative;
-      z-index: 1;
-    }
-
-    .stat-card.sales {
-      --accent: #1663a6;
-      --tint: rgba(22, 99, 166, .14);
-    }
-
-    .stat-card.purchase {
-      --accent: #b86b12;
-      --tint: rgba(184, 107, 18, .15);
-    }
-
-    .stat-card.collected {
-      --accent: #14845f;
-      --tint: rgba(20, 132, 95, .15);
-    }
-
-    .stat-card.pending {
-      --accent: #c43d3d;
-      --tint: rgba(196, 61, 61, .13);
-    }
-
-    .stat-top {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 14px;
-      gap: 10px;
-    }
-
-    .stat-label {
-      font-size: 13px;
-      color: var(--muted);
-      font-weight: 650;
-    }
-
-    .stat-card i {
-      width: 34px;
-      height: 34px;
-      display: grid;
-      place-items: center;
-      border-radius: var(--radius);
-      background: rgba(255, 255, 255, .72);
-      color: var(--accent, var(--blue));
-      font-size: 19px;
-    }
-
-    .stat-val {
-      font-size: 25px;
-      font-weight: 780;
-      color: var(--text);
-    }
-
-    .stat-val.blue {
-      color: #0d5f9d;
-    }
-
-    .stat-val.green {
-      color: var(--green);
-    }
-
-    .stat-val.amber {
-      color: var(--amber);
-    }
-
-    .stat-val.red {
-      color: var(--red);
-    }
-
-    .split-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 18px;
-    }
-
-    .card {
-      background: rgba(255, 255, 255, .94);
-      border: 1px solid rgba(22, 99, 166, .14);
-      border-radius: var(--radius);
-      box-shadow: 0 16px 34px rgba(24, 34, 48, .06);
-      overflow: hidden;
-    }
-
-    .card-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      padding: 16px 18px;
-      border-bottom: 1px solid rgba(22, 99, 166, .1);
-      background: linear-gradient(135deg, rgba(255, 255, 255, .9), rgba(238, 246, 255, .78));
-    }
-
-    .card-title {
-      font-size: 15px;
-      font-weight: 760;
-    }
-
-    .card-subtitle {
-      display: block;
-      margin-top: 2px;
-      color: var(--muted);
-      font-size: 12px;
-    }
-
-    .toolbar {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 14px;
-      margin-bottom: 14px;
-    }
-
-    .search-wrap {
-      position: relative;
-      width: min(390px, 100%);
-    }
-
-    .search-wrap i {
-      position: absolute;
-      left: 12px;
-      top: 50%;
-      transform: translateY(-50%);
-      color: var(--faint);
-      font-size: 18px;
-      pointer-events: none;
-    }
-
-    .search-wrap input,
-    .form-group input,
-    .form-group select,
-    .form-group textarea {
-      width: 100%;
-      border: 1px solid var(--line);
-      border-radius: var(--radius);
-      background: #fff;
-      color: var(--text);
-      min-height: 40px;
-      padding: 9px 11px;
-      outline: none;
-      transition: border-color .15s, box-shadow .15s;
-    }
-
-    .search-wrap input {
-      padding-left: 39px;
-    }
-
-    input:focus,
-    select:focus,
-    textarea:focus {
-      border-color: var(--blue);
-      box-shadow: 0 0 0 3px rgba(22, 99, 166, .12);
-    }
-
-    .btn {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 7px;
-      min-height: 40px;
-      padding: 9px 14px;
-      border: 1px solid var(--line);
-      border-radius: var(--radius);
-      cursor: pointer;
-      background: #fff;
-      color: var(--text);
-      font-size: 13px;
-      font-weight: 700;
-      white-space: nowrap;
-      transition: background .15s, border-color .15s, transform .15s;
-    }
-
-    .btn:hover {
-      background: var(--panel-soft);
-    }
-
-    .btn:active {
-      transform: translateY(1px);
-    }
-
-    .btn.primary {
-      background: var(--blue);
-      color: #fff;
-      border-color: var(--blue);
-    }
-
-    .btn.primary:hover {
-      background: var(--blue-dark);
-      border-color: var(--blue-dark);
-    }
-
-    .btn.danger {
-      color: var(--red);
-    }
-
-    .btn.danger:hover {
-      background: #fff1f1;
-      border-color: #f2c2c2;
-    }
-
-    .btn.sm {
-      min-height: 32px;
-      padding: 6px 10px;
-      font-size: 12px;
-    }
-
-    .btn.icon {
-      width: 34px;
-      padding: 0;
-    }
-
-    .table-wrap {
-      width: 100%;
-      overflow-x: auto;
-    }
-
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 13px;
-      min-width: 720px;
-    }
-
-    th {
-      text-align: left;
-      padding: 11px 14px;
-      color: var(--muted);
-      font-weight: 750;
-      border-bottom: 1px solid var(--line-soft);
-      font-size: 12px;
-      background: #fbfcfd;
-    }
-
-    td {
-      padding: 12px 14px;
-      border-bottom: 1px solid var(--line-soft);
-      color: var(--text);
-      vertical-align: middle;
-    }
-
-    tr:last-child td {
-      border-bottom: 0;
-    }
-
-    tbody tr:hover td {
-      background: #f7fbff;
-    }
-
-    .cell-strong {
-      font-weight: 760;
-    }
-
-    .badge {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      min-height: 24px;
-      padding: 3px 9px;
-      border-radius: 999px;
-      font-size: 12px;
-      font-weight: 750;
-    }
-
-    .badge.paid {
-      background: #e7f7ef;
-      color: var(--green);
-    }
-
-    .badge.pending {
-      background: #fff4df;
-      color: var(--amber);
-    }
-
-    .badge.cancelled {
-      background: #fff0f0;
-      color: var(--red);
-    }
-
-    .modal-bg {
-      display: none;
-      position: fixed;
-      inset: 0;
-      z-index: 100;
-      align-items: center;
-      justify-content: center;
-      padding: 18px;
-      background: rgba(16, 24, 40, .52);
-    }
-
-    .modal-bg.open {
-      display: flex;
-    }
-
-    .modal {
-      background: var(--panel);
-      border-radius: var(--radius);
-      border: 1px solid rgba(255, 255, 255, .5);
-      width: 720px;
-      max-width: 100%;
-      max-height: 92vh;
-      overflow: auto;
-      box-shadow: var(--shadow);
-    }
-
-    .modal-head {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 18px 20px;
-      border-bottom: 1px solid var(--line-soft);
-    }
-
-    .modal-head h2 {
-      font-size: 18px;
-      font-weight: 780;
-    }
-
-    .modal-body {
-      padding: 18px 20px;
-    }
-
-    .form-row {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 14px;
-      margin-bottom: 14px;
-    }
-
-    .form-group {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-    }
-
-    .form-group label {
-      font-size: 12px;
-      color: var(--muted);
-      font-weight: 720;
-    }
-
-    .items-table {
-      min-width: 620px;
-    }
-
-    .items-table th {
-      padding: 9px 10px;
-    }
-
-    .items-table td {
-      padding: 8px 10px;
-    }
-
-    .items-table input {
-      width: 100%;
-      min-height: 34px;
-      border: 1px solid transparent;
-      background: #f8fafc;
-      border-radius: 6px;
-      color: var(--text);
-      padding: 7px 8px;
-      outline: none;
-    }
-
-    .items-table input:focus {
-      border-color: var(--blue);
-      background: #fff;
-      box-shadow: 0 0 0 3px rgba(22, 99, 166, .1);
-    }
-
-    .total-section {
-      margin-top: 14px;
-      border: 1px solid var(--line-soft);
-      border-radius: var(--radius);
-      background: #fbfcfd;
-      padding: 12px 14px;
-      width: min(360px, 100%);
-      margin-left: auto;
-    }
-
-    .total-row {
-      display: flex;
-      justify-content: space-between;
-      gap: 20px;
-      padding: 5px 0;
-      font-size: 13px;
-      color: var(--muted);
-    }
-
-    .total-row.grand {
-      margin-top: 5px;
-      padding-top: 10px;
-      border-top: 1px solid var(--line);
-      font-size: 18px;
-      font-weight: 800;
-      color: var(--text);
-    }
-
-    .modal-footer {
-      display: flex;
-      justify-content: flex-end;
-      gap: 10px;
-      padding: 16px 20px;
-      border-top: 1px solid var(--line-soft);
-      background: #fbfcfd;
-    }
-
-    .empty {
-      text-align: center;
-      padding: 30px 16px;
-      color: var(--muted);
-      font-size: 13px;
-    }
-
-    .summary-grid {
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 12px;
-      margin-bottom: 14px;
-    }
-
-    .mini-stat {
-      border: 1px solid var(--line-soft);
-      border-radius: var(--radius);
-      background: #fbfcfd;
-      padding: 12px;
-    }
-
-    .mini-stat span {
-      display: block;
-      color: var(--muted);
-      font-size: 12px;
-      font-weight: 700;
-      margin-bottom: 6px;
-    }
-
-    .mini-stat strong {
-      display: block;
-      color: var(--text);
-      font-size: 18px;
-    }
-
-    .invoice-paper {
-      background: #fff;
-      border: 1px solid var(--line);
-      border-radius: var(--radius);
-      padding: 22px;
-    }
-
-    .invoice-head {
-      display: flex;
-      justify-content: space-between;
-      gap: 18px;
-      border-bottom: 2px solid var(--text);
-      padding-bottom: 16px;
-      margin-bottom: 18px;
-    }
-
-    .invoice-head h3 {
-      font-size: 26px;
-      margin-bottom: 4px;
-    }
-
-    .invoice-meta {
-      text-align: right;
-      color: var(--muted);
-      font-size: 13px;
-      line-height: 1.7;
-    }
-
-    .invoice-party {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 16px;
-      margin-bottom: 16px;
-      color: var(--muted);
-      font-size: 13px;
-      line-height: 1.7;
-    }
-
-    .invoice-party strong {
-      display: block;
-      color: var(--text);
-      font-size: 15px;
-    }
-
-    .invoice-note {
-      margin-top: 14px;
-      color: var(--muted);
-      font-size: 13px;
-    }
-
-    .invoice-modal-shell {
-      width: min(1180px, 98vw);
-      background: #f7f8fb;
-    }
-
-    .create-invoice-head {
-      display: grid;
-      grid-template-columns: 1fr auto;
-      align-items: center;
-      gap: 16px;
-      padding: 14px 18px;
-      background: #fff;
-      border-bottom: 1px solid var(--line-soft);
-    }
-
-    .create-title {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
-
-    .create-title .back-btn {
-      width: 34px;
-      height: 34px;
-      display: grid;
-      place-items: center;
-      border-radius: 8px;
-      background: transparent;
-      color: #555f6d;
-      cursor: pointer;
-    }
-
-    .create-title h2 {
-      font-size: 22px;
-      line-height: 1.1;
-      margin: 0;
-    }
-
-    .create-title small {
-      display: block;
-      margin-top: 3px;
-      color: var(--muted);
-      font-weight: 700;
-    }
-
-    .bill-number {
-      display: grid;
-      grid-template-columns: 120px 140px;
-      min-width: 260px;
-      border: 1px solid var(--line);
-      border-radius: 7px;
-      overflow: hidden;
-      background: #fff;
-    }
-
-    .bill-number input {
-      border: 0;
-      min-height: 44px;
-      padding: 9px 14px;
-      box-shadow: none;
-      border-radius: 0;
-      font-weight: 800;
-    }
-
-    .bill-number input:first-child {
-      border-right: 1px solid var(--line);
-      text-align: right;
-      color: #2f3640;
-    }
-
-    .invoice-save-top {
-      min-width: 100px;
-      min-height: 40px;
-      font-size: 14px;
-    }
-
-    .invoice-create-body {
-      padding: 18px 26px 24px;
-    }
-
-    .invoice-top-grid {
-      display: grid;
-      grid-template-columns: minmax(320px, 1fr) minmax(520px, 2fr);
-      gap: 26px;
-      margin-bottom: 26px;
-    }
-
-    .soft-panel {
-      background: #eef6ff;
-      border: 1px solid #e7f0fb;
-      border-radius: 8px;
-      padding: 16px;
-    }
-
-    .soft-panel.neutral {
-      background: #f5f5f6;
-      border-color: #f0f1f3;
-    }
-
-    .panel-label-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 10px;
-      margin-bottom: 8px;
-      color: #5b6472;
-      font-size: 16px;
-      font-weight: 800;
-    }
-
-    .link-btn {
-      background: transparent;
-      color: #475467;
-      cursor: pointer;
-      font-weight: 800;
-    }
-
-    .invoice-fields {
-      display: grid;
-      grid-template-columns: 180px 180px minmax(260px, 1fr);
-      gap: 12px;
-    }
-
-    .invoice-fields .form-group label {
-      font-size: 16px;
-      color: #5f6671;
-      margin-bottom: 4px;
-    }
-
-    .product-entry {
-      background: #eef6ff;
-      border-radius: 8px;
-      padding: 14px 16px 18px;
-      margin-top: 20px;
-    }
-
-    .quick-add-row {
-      display: grid;
-      grid-template-columns: 176px minmax(260px, 1fr) 168px auto;
-      gap: 16px;
-      margin-bottom: 18px;
-    }
-
-    .quick-add-row input {
-      min-height: 45px;
-      font-size: 16px;
-    }
-
-    .quick-add-row .btn {
-      min-height: 42px;
-      font-size: 16px;
-      align-self: center;
-    }
-
-    .invoice-create-body .items-table th {
-      background: #f7f7f8;
-      color: #616975;
-      font-size: 13px;
-      padding: 13px 14px;
-    }
-
-    .invoice-create-body .items-table td {
-      background: #fff;
-    }
-
-    .stock-chips {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      margin-top: 10px;
-    }
-
-    /* ===== EMPLOYEE MODE STYLES ===== */
-    .employee-nav-section {
-      padding: 12px 12px 0;
-    }
-
-    .employee-btn {
-      width: 100%;
-      display: flex;
-      align-items: center;
-      gap: 11px;
-      min-height: 46px;
-      padding: 10px 14px;
-      background: linear-gradient(135deg, #ff9500, #ff6b00);
-      color: #fff;
-      border: none;
-      border-radius: var(--radius);
-      cursor: pointer;
-      text-align: left;
-      font-weight: 750;
-      font-size: 14px;
-      box-shadow: 0 6px 18px rgba(255, 107, 0, .28);
-      transition: transform .15s, box-shadow .15s;
-    }
-
-    .employee-btn:hover {
-      transform: translateY(-1px);
-      box-shadow: 0 10px 28px rgba(255, 107, 0, .35);
-    }
-
-    .employee-btn i {
-      font-size: 20px;
-    }
-
-    .employee-btn .premium-tag {
-      margin-left: auto;
-      background: rgba(255, 255, 255, .22);
-      padding: 2px 8px;
-      border-radius: 99px;
-      font-size: 10px;
-      font-weight: 800;
-      letter-spacing: .3px;
-    }
-
-    /* Premium Modal */
-    .premium-modal-shell {
-      width: min(520px, 96vw);
-    }
-
-    .premium-hero {
-      text-align: center;
-      padding: 32px 24px 22px;
-      background: linear-gradient(135deg, #ff9500, #ff5e00);
-      color: #fff;
-    }
-
-    .premium-hero i {
-      font-size: 52px;
-      margin-bottom: 10px;
-      display: block;
-    }
-
-    .premium-hero h2 {
-      font-size: 26px;
-      font-weight: 800;
-      margin-bottom: 6px;
-    }
-
-    .premium-hero p {
-      font-size: 14px;
-      opacity: .88;
-    }
-
-    .premium-price {
-      text-align: center;
-      padding: 22px 24px;
-      background: #fff;
-    }
-
-    .premium-price .amount {
-      font-size: 42px;
-      font-weight: 900;
-      color: #ff6b00;
-    }
-
-    .premium-price .amount small {
-      font-size: 16px;
-      color: var(--muted);
-      font-weight: 600;
-    }
-
-    .premium-features {
-      padding: 0 24px 18px;
-      background: #fff;
-    }
-
-    .premium-features ul {
-      list-style: none;
-      padding: 0;
-    }
-
-    .premium-features li {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 8px 0;
-      font-size: 14px;
-      color: #344054;
-      border-bottom: 1px solid #f2f4f7;
-    }
-
-    .premium-features li:last-child {
-      border-bottom: 0;
-    }
-
-    .premium-features li i {
-      color: #14845f;
-      font-size: 18px;
-    }
-
-    .premium-actions {
-      padding: 16px 24px 20px;
-      background: #fbfcfd;
-      border-top: 1px solid var(--line-soft);
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-    }
-
-    .btn.premium-pay {
-      background: linear-gradient(135deg, #ff9500, #ff5e00);
-      color: #fff;
-      border: none;
-      font-size: 16px;
-      font-weight: 800;
-      min-height: 48px;
-      box-shadow: 0 8px 22px rgba(255, 107, 0, .25);
-    }
-
-    .btn.premium-pay:hover {
-      box-shadow: 0 12px 32px rgba(255, 107, 0, .35);
-    }
-
-    /* Employee Login Modal */
-    .emp-login-modal-shell {
-      width: min(440px, 96vw);
-    }
-
-    .emp-login-hero {
-      text-align: center;
-      padding: 26px 20px 18px;
-      background: linear-gradient(135deg, #1663a6, #0d4e82);
-      color: #fff;
-    }
-
-    .emp-login-hero i {
-      font-size: 44px;
-      display: block;
-      margin-bottom: 8px;
-    }
-
-    .emp-login-hero h2 {
-      font-size: 22px;
-      font-weight: 800;
-    }
-
-    .emp-login-hero p {
-      font-size: 13px;
-      opacity: .82;
-      margin-top: 4px;
-    }
-
-    /* Employee Mode Badge */
-    .emp-mode-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      padding: 5px 12px;
-      border-radius: 99px;
-      background: linear-gradient(135deg, #ff9500, #ff5e00);
-      color: #fff;
-      font-size: 12px;
-      font-weight: 800;
-      box-shadow: 0 4px 12px rgba(255, 107, 0, .2);
-      animation: empBadgePulse 2s ease-in-out infinite;
-    }
-
-    @keyframes empBadgePulse {
-
-      0%,
-      100% {
-        box-shadow: 0 4px 12px rgba(255, 107, 0, .2);
-      }
-
-      50% {
-        box-shadow: 0 4px 20px rgba(255, 107, 0, .4);
-      }
-    }
-
-    .nav-item.emp-disabled {
-      opacity: .45;
-      cursor: not-allowed;
-    }
-
-    .nav-item.emp-disabled:hover {
-      background: transparent;
-      box-shadow: none;
-      color: #30435d;
-    }
-
-    /* Toast Notification */
-    .toast-container {
-      position: fixed;
-      bottom: 24px;
-      right: 24px;
-      z-index: 9999;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
-
-    .toast {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 12px 18px;
-      border-radius: 10px;
-      background: rgba(16, 24, 40, .92);
-      color: #fff;
-      font-size: 13px;
-      font-weight: 650;
-      box-shadow: 0 12px 34px rgba(0, 0, 0, .25);
-      backdrop-filter: blur(14px);
-      animation: toastIn .35s ease-out;
-      max-width: 340px;
-    }
-
-    .toast i {
-      font-size: 20px;
-      flex-shrink: 0;
-    }
-
-    .toast.warning i {
-      color: #ffb020;
-    }
-
-    .toast.success i {
-      color: #2ed573;
-    }
-
-    .toast.error i {
-      color: #ff4757;
-    }
-
-    @keyframes toastIn {
-      from {
-        opacity: 0;
-        transform: translateY(18px) scale(.95);
-      }
-
-      to {
-        opacity: 1;
-        transform: translateY(0) scale(1);
-      }
-    }
-
-    .toast.toast-out {
-      animation: toastOut .3s ease-in forwards;
-    }
-
-    @keyframes toastOut {
-      to {
-        opacity: 0;
-        transform: translateY(18px) scale(.95);
-      }
-    }
-
-    /* Exit Employee Btn */
-    .exit-emp-btn {
-      display: none;
-      margin: 8px 12px;
-      padding: 9px 14px;
-      background: #fff1f1;
-      border: 1px solid #f2c2c2;
-      color: var(--red);
-      font-weight: 750;
-      font-size: 13px;
-      border-radius: var(--radius);
-      cursor: pointer;
-      text-align: center;
-      transition: background .15s;
-    }
-
-    .exit-emp-btn:hover {
-      background: #ffe0e0;
-    }
-
-    body.employee-mode .exit-emp-btn {
-      display: block;
-    }
-
-    body.employee-mode .employee-btn {
-      display: none;
-    }
-
-    @media print {
-      body * {
-        visibility: hidden;
-      }
-
-      #print-area,
-      #print-area * {
-        visibility: visible;
-      }
-
-      #print-area {
-        position: absolute;
-        inset: 0;
-        padding: 0;
-      }
-
-      .modal-footer,
-      .modal-head .btn {
-        display: none !important;
-      }
-
-      .modal,
-      .invoice-paper {
-        width: 100%;
-        max-height: none;
-        overflow: visible;
-        border: 0;
-        box-shadow: none;
-      }
-    }
-
-    @media (max-width: 980px) {
-      .app {
-        grid-template-columns: 1fr;
-      }
-
-      .sidebar {
-        position: static;
-        height: auto;
-        border-right: 0;
-        border-bottom: 1px solid rgba(22, 99, 166, .18);
-      }
-
-      .brand {
-        padding: 16px;
-      }
-
-      .nav {
-        display: flex;
-        gap: 8px;
-        overflow-x: auto;
-        padding: 10px 12px;
-      }
-
-      .nav-section {
-        display: none;
-      }
-
-      .nav-item {
-        width: auto;
-        flex: 0 0 auto;
-      }
-
-      .dashboard-grid,
-      .split-grid {
-        grid-template-columns: 1fr 1fr;
-      }
-
-      .invoice-top-grid,
-      .invoice-fields,
-      .quick-add-row {
-        grid-template-columns: 1fr;
-      }
-
-      .content {
-        padding: 18px;
-      }
-    }
-
-    @media (max-width: 680px) {
-      .topbar {
-        align-items: flex-start;
-        padding: 14px 16px;
-      }
-
-      .topbar h1 {
-        font-size: 19px;
-      }
-
-      .create-invoice-head {
-        grid-template-columns: 1fr;
-      }
-
-      .bill-number {
-        grid-template-columns: 1fr 1fr;
-        min-width: 0;
-      }
-
-      .invoice-create-body {
-        padding: 14px;
-      }
-
-      .toolbar {
-        align-items: stretch;
-        flex-direction: column;
-      }
-
-      .toolbar .btn {
-        width: 100%;
-      }
-
-      .dashboard-grid,
-      .split-grid,
-      .form-row {
-        grid-template-columns: 1fr;
-      }
-
-      .summary-grid,
-      .invoice-party,
-      .invoice-head {
-        grid-template-columns: 1fr;
-      }
-
-      .invoice-head,
-      .invoice-meta {
-        text-align: left;
-      }
-
-      .modal-footer {
-        flex-direction: column-reverse;
-      }
-
-      .modal-footer .btn {
-        width: 100%;
-      }
-    }
+    .torch-btn.show { display: block; }
+    .torch-btn.on { background: rgba(255,200,0,0.8); }
+
+    .scan-hint {
+      position: absolute; bottom: 8px; left: 0; right: 0;
+      text-align: center; font-size: 12px;
+      color: rgba(255,255,255,0.85); text-shadow: 0 1px 3px #000;
+    }
+    .engine-badge {
+      position: absolute; top: 8px; right: 10px;
+      font-size: 10px; background: rgba(0,0,0,0.55);
+      color: #00ff88; padding: 3px 8px;
+      border-radius: 20px; font-weight: 700;
+    }
+
+    .confirm-overlay {
+      display: none; position: absolute; inset: 0;
+      background: rgba(0,0,0,0.75);
+      flex-direction: column; align-items: center;
+      justify-content: center; gap: 14px; z-index: 10;
+    }
+    .confirm-overlay.show { display: flex; }
+    .confirm-code {
+      background: #fff; color: #0c477c;
+      font-size: 20px; font-weight: 900;
+      padding: 12px 22px; border-radius: 12px;
+      text-align: center; word-break: break-all; max-width: 90%;
+    }
+    .confirm-label { font-size: 13px; color: rgba(255,255,255,0.85); margin-top: -6px; }
+    .confirm-btns { display: flex; gap: 12px; margin-top: 4px; }
+    .btn-ok {
+      padding: 14px 32px; background: #00cc66; color: #fff;
+      border: none; border-radius: 50px; font-size: 18px;
+      font-weight: 900; cursor: pointer;
+      box-shadow: 0 4px 14px rgba(0,204,102,0.5); letter-spacing: 1px;
+    }
+    .btn-ok:active { opacity: 0.85; transform: scale(0.97); }
+    .btn-retry {
+      padding: 14px 22px; background: rgba(255,255,255,0.15);
+      color: #fff; border: 2px solid rgba(255,255,255,0.4);
+      border-radius: 50px; font-size: 15px; font-weight: 700; cursor: pointer;
+    }
+    .btn-retry:active { opacity: 0.8; }
+
+    .panel {
+      flex: 1; background: #fff; border-radius: 22px 22px 0 0;
+      padding: 18px 16px 30px; display: flex;
+      flex-direction: column; gap: 12px;
+      margin-top: -10px; position: relative; z-index: 2;
+    }
+    .btn-camera {
+      width: 100%; padding: 14px;
+      background: linear-gradient(135deg, #16a663, #0c7c47);
+      color: #fff; border: none; border-radius: 12px;
+      font-size: 16px; font-weight: 700; cursor: pointer;
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+    }
+    .btn-camera:active { opacity: 0.85; }
+    .btn-camera.off { background: linear-gradient(135deg, #e53e3e, #c53030); }
+    .status-pill {
+      display: none; text-align: center;
+      padding: 10px 14px; border-radius: 10px;
+      font-size: 14px; font-weight: 700;
+    }
+    .status-pill.success { background: #d4edda; color: #155724; }
+    .status-pill.error   { background: #f8d7da; color: #721c24; }
+    .status-pill.warn    { background: #fff3cd; color: #856404; }
+    .status-pill.sending { background: #cce5ff; color: #004085; }
+    .divider {
+      display: flex; align-items: center; gap: 8px;
+      color: #aaa; font-size: 11px; font-weight: 700;
+    }
+    .divider::before, .divider::after {
+      content: ''; flex: 1; height: 1px; background: #e0e0e0;
+    }
+    label.field-label {
+      font-size: 11px; font-weight: 700; color: #888;
+      text-transform: uppercase; letter-spacing: 1px;
+      display: block; margin-bottom: 6px;
+    }
+    input[type="text"], input[type="number"] {
+      width: 100%; border: 2px solid #1663a6; border-radius: 10px;
+      padding: 11px 14px; font-size: 16px; font-weight: 600;
+      outline: none; color: #222; background: #f7f9fb;
+    }
+    input[type="number"] { border-color: #ddd; }
+    .btn-send {
+      width: 100%; padding: 14px;
+      background: linear-gradient(135deg, #1663a6, #0c477c);
+      color: #fff; border: none; border-radius: 12px;
+      font-size: 16px; font-weight: 800; cursor: pointer;
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+    }
+    .btn-send:active { opacity: 0.85; }
+    .btn-send:disabled { opacity: 0.5; }
+    .log-header {
+      display: flex; justify-content: space-between;
+      align-items: center; margin-bottom: 6px;
+    }
+    .log-header span { font-size: 11px; font-weight: 700; color: #888; text-transform: uppercase; letter-spacing: 1px; }
+    .log-header button { font-size: 12px; color: #aaa; background: none; border: none; cursor: pointer; }
+    #log-list {
+      max-height: 180px; overflow-y: auto;
+      display: flex; flex-direction: column; gap: 5px;
+    }
+    .log-item {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 8px 12px; background: #f7f9fb; border-radius: 8px;
+      animation: fadeIn 0.2s ease;
+    }
+    @keyframes fadeIn { from { opacity:0; transform:translateY(-4px); } to { opacity:1; } }
+    .log-barcode { font-size: 14px; font-weight: 700; color: #222; }
+    .log-meta    { font-size: 11px; color: #888; }
+    .log-empty   { font-size: 13px; color: #bbb; text-align: center; padding: 14px 0; }
+    canvas { display: none; }
   </style>
 </head>
+<body>
 
-<body class="auth-locked">
-
-  <!-- AUTH SCREEN -->
-  <section class="auth-screen">
-    <div class="auth-card">
-      <div class="logo"><span class="logo-mark"><i class="ti ti-receipt-2"></i></span>Bill<span>Pro</span></div>
-
-      <!-- Authentication Tabs -->
-      <div style="display:flex; border-bottom:2px solid var(--line-soft); margin-bottom:18px;">
-        <button id="tab-admin-login" class="link-btn" onclick="switchAuthTab('admin')"
-          style="flex:1; padding:10px; border-bottom:2px solid var(--blue); font-weight:800; color:var(--blue); font-size:14px; outline:none;">Admin
-          Login</button>
-        <button id="tab-emp-login" class="link-btn" onclick="switchAuthTab('employee')"
-          style="flex:1; padding:10px; font-weight:800; color:var(--muted); font-size:14px; outline:none;">Employee
-          Login</button>
-      </div>
-
-      <h1 id="auth-title">Login</h1>
-      <p id="auth-copy">Email aur password se login karein.</p>
-
-      <div class="form-group" id="auth-email-row">
-        <label>Email</label>
-        <input type="email" id="auth-email" autocomplete="email" placeholder="name@example.com">
-      </div>
-
-      <div class="form-group" id="auth-emp-user-row" style="display:none">
-        <label>Employee User ID</label>
-        <input type="text" id="auth-emp-username" placeholder="Employee User ID">
-      </div>
-
-      <div class="form-group" id="auth-question-row" style="display:none">
-        <label>Secret Question</label>
-        <select id="auth-question"></select>
-      </div>
-
-      <div class="form-group" id="auth-answer-row" style="display:none">
-        <label>Secret Answer</label>
-        <input type="text" id="auth-answer" autocomplete="off" placeholder="Answer">
-      </div>
-
-      <div class="form-group">
-        <label>Password</label>
-        <input type="password" id="auth-pass" autocomplete="current-password" placeholder="Password">
-      </div>
-
-      <div class="form-group" id="auth-otp-row" style="display:none">
-        <label>OTP</label>
-        <input type="text" id="auth-otp" inputmode="numeric" placeholder="6 digit OTP">
-      </div>
-
-      <div class="auth-actions">
-        <button class="btn primary" id="auth-main-btn" onclick="login()">Login</button>
-        <button class="btn" id="auth-switch-btn" onclick="setAuthMode('signup')">Naya Account</button>
-      </div>
-
-      <button class="link-btn" id="forgot-btn" style="margin-top:12px" onclick="setAuthMode('forgot')">Password bhool
-        gaye?</button>
-
-      <div class="auth-hint">🔥 Firebase se powered — data cloud mein save hoga, kisi bhi device se access kar saktein
-        hain.</div>
-    </div>
-  </section>
-
-  <!-- MAIN APP -->
-  <div class="app">
-    <aside class="sidebar">
-      <div class="brand">
-        <div class="logo"><span class="logo-mark"><i class="ti ti-receipt-2"></i></span>Bill<span>Pro</span></div>
-        <small>Sales, purchase aur party records</small>
-      </div>
-      <nav class="nav" aria-label="Main navigation">
-        <div class="nav-section">Overview</div>
-        <button class="nav-item active" data-page="dashboard" onclick="showPage('dashboard',this)"><i
-            class="ti ti-layout-dashboard"></i>Dashboard</button>
-        <div class="nav-section">Sales</div>
-        <button class="nav-item" data-page="sales" onclick="showPage('sales',this)"><i
-            class="ti ti-file-invoice"></i>Sale Invoice</button>
-        <button class="nav-item" data-page="customers" onclick="showPage('customers',this)"><i
-            class="ti ti-users"></i>Customers</button>
-        <div class="nav-section">Inventory</div>
-        <button class="nav-item" data-page="products" onclick="showPage('products',this)"><i
-            class="ti ti-box"></i>Products</button>
-        <div class="nav-section">Purchase</div>
-        <button class="nav-item" data-page="purchase" onclick="showPage('purchase',this)"><i
-            class="ti ti-shopping-cart"></i>Purchase Bill</button>
-        <button class="nav-item" data-page="vendors" onclick="showPage('vendors',this)"><i
-            class="ti ti-building-store"></i>Vendors</button>
-        <div class="nav-section">Staff</div>
-        <button class="nav-item" data-page="employees" onclick="handleEmployeesNavClick(this)"><i
-            class="ti ti-users-group"></i>Employees <span id="emp-premium-badge" class="badge pending"
-            style="margin-left: auto; font-size: 10px; padding: 2px 6px;">PREMIUM</span></button>
-      </nav>
-      <div class="employee-nav-section" id="sidebar-emp-section" style="display:none">
-        <button class="exit-emp-btn" onclick="exitEmployeeMode()"
-          style="display:block; margin:8px 12px; width:calc(100% - 24px);">
-          <i class="ti ti-logout"></i> Employee Mode se Exit
-        </button>
-      </div>
-    </aside>
-
-    <main class="main">
-      <header class="topbar">
-        <div>
-          <h1 id="page-title">Dashboard</h1>
-          <p id="page-subtitle">Business Performance Overview</p>
-        </div>
-        <div class="live-header-clock">
-          <div id="liveTime"></div>
-          <div id="liveDate"></div>
-        </div>
-        <div style="display:flex;align-items:center;gap:10px">
-          <span id="emp-mode-indicator" class="emp-mode-badge" style="display:none"><i
-              class="ti ti-shield-check"></i>Employee Mode</span>
-          <button id="exit-emp-btn-header" class="btn sm danger" style="display:none" onclick="exitEmployeeMode()"><i
-              class="ti ti-logout"></i>Exit Employee Mode</button>
-          <span class="user-pill"><i class="ti ti-user-circle"></i><span id="current-user-label"></span></span>
-          <button class="btn sm" onclick="logout()"><i class="ti ti-logout"></i>Logout</button>
-        </div>
-      </header>
-
-      <section class="content">
-
-        <!-- DASHBOARD -->
-        <div class="page active" id="page-dashboard">
-          <div class="dashboard-grid" id="dash-stats"></div>
-          <div class="split-grid">
-            <div class="card">
-              <div class="card-header">
-                <div><span class="card-title">Recent Sales</span><span class="card-subtitle">Last 3 invoices</span>
-                </div>
-              </div>
-              <div class="table-wrap">
-                <table id="dash-sales-table">
-                  <thead>
-                    <tr>
-                      <th>Party</th>
-                      <th>Amount</th>
-                      <th>Status</th>
-                    </tr>
-                  </thead>
-                  <tbody></tbody>
-                </table>
-              </div>
-            </div>
-            <div class="card">
-              <div class="card-header">
-                <div><span class="card-title">Recent Purchases</span><span class="card-subtitle">Last 3 bills</span>
-                </div>
-              </div>
-              <div class="table-wrap">
-                <table id="dash-purchase-table">
-                  <thead>
-                    <tr>
-                      <th>Vendor</th>
-                      <th>Amount</th>
-                      <th>Status</th>
-                    </tr>
-                  </thead>
-                  <tbody></tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- SALES -->
-        <div class="page" id="page-sales">
-          <div class="toolbar">
-            <div class="search-wrap"><i class="ti ti-search"></i><input type="text" placeholder="Search invoices..."
-                oninput="filterTable('sales-table',this.value)"></div>
-            <button class="btn primary" onclick="openModal('sale')"><i class="ti ti-plus"></i>New Sale Invoice</button>
-          </div>
-          <div class="card">
-            <div class="table-wrap">
-              <table id="sales-table">
-                <thead>
-                  <tr>
-                    <th>#</th>
-                    <th>Invoice No</th>
-                    <th>Party Name</th>
-                    <th>Date</th>
-                    <th>Items</th>
-                    <th>Total</th>
-                    <th>Status</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody id="sales-tbody"></tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-
-        <!-- PURCHASE -->
-        <div class="page" id="page-purchase">
-          <div class="toolbar">
-            <div class="search-wrap"><i class="ti ti-search"></i><input type="text" placeholder="Search bills..."
-                oninput="filterTable('purchase-table',this.value)"></div>
-            <button class="btn primary" onclick="openModal('purchase')"><i class="ti ti-plus"></i>New Purchase
-              Bill</button>
-          </div>
-          <div class="card">
-            <div class="table-wrap">
-              <table id="purchase-table">
-                <thead>
-                  <tr>
-                    <th>#</th>
-                    <th>Bill No</th>
-                    <th>Vendor Name</th>
-                    <th>Date</th>
-                    <th>Items</th>
-                    <th>Total</th>
-                    <th>Status</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody id="purchase-tbody"></tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-
-        <!-- CUSTOMERS -->
-        <div class="page" id="page-customers">
-          <div class="toolbar">
-            <div class="search-wrap"><i class="ti ti-search"></i><input type="text" placeholder="Search customers..."
-                oninput="filterTable('customers-table',this.value)"></div>
-            <button class="btn primary" onclick="openPartyModal('customer')"><i class="ti ti-plus"></i>Add
-              Customer</button>
-          </div>
-          <div class="card">
-            <div class="table-wrap">
-              <table id="customers-table">
-                <thead>
-                  <tr>
-                    <th>#</th>
-                    <th>Name</th>
-                    <th>Phone</th>
-                    <th>GSTIN</th>
-                    <th>Total Bills</th>
-                    <th>Amount</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody id="customers-tbody"></tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-
-        <!-- PRODUCTS -->
-        <div class="page" id="page-products">
-          <div class="toolbar">
-            <div class="search-wrap"><i class="ti ti-search"></i><input type="text" placeholder="Search products..."
-                oninput="filterTable('products-table',this.value)"></div>
-            <button class="btn primary" onclick="openProductModal()"><i class="ti ti-plus"></i>Add Product</button>
-          </div>
-          <div class="card">
-            <div class="table-wrap">
-              <table id="products-table">
-                <thead>
-                  <tr>
-                    <th>#</th>
-                    <th>Product</th>
-                    <th>Unit</th>
-                    <th>Sale Price</th>
-                    <th>Purchase Price</th>
-                    <th>GST</th>
-                    <th>Stock</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody id="products-tbody"></tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-
-        <!-- VENDORS -->
-        <div class="page" id="page-vendors">
-          <div class="toolbar">
-            <div class="search-wrap"><i class="ti ti-search"></i><input type="text" placeholder="Search vendors..."
-                oninput="filterTable('vendors-table',this.value)"></div>
-            <button class="btn primary" onclick="openPartyModal('vendor')"><i class="ti ti-plus"></i>Add Vendor</button>
-          </div>
-          <div class="card">
-            <div class="table-wrap">
-              <table id="vendors-table">
-                <thead>
-                  <tr>
-                    <th>#</th>
-                    <th>Name</th>
-                    <th>Phone</th>
-                    <th>GSTIN</th>
-                    <th>Total Bills</th>
-                    <th>Amount</th>
-                  </tr>
-                </thead>
-                <tbody id="vendors-tbody"></tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-
-        <!-- EMPLOYEES -->
-        <div class="page" id="page-employees">
-          <div class="toolbar">
-            <div class="search-wrap"><i class="ti ti-search"></i><input type="text" placeholder="Search employees..."
-                oninput="filterTable('employees-table',this.value)"></div>
-            <button class="btn primary" onclick="openEmpSetupModal()"><i class="ti ti-plus"></i>Add Employee</button>
-          </div>
-          <div class="card">
-            <div class="table-wrap">
-              <table id="employees-table">
-                <thead>
-                  <tr>
-                    <th>#</th>
-                    <th>User ID (Username)</th>
-                    <th>Password</th>
-                    <th>Status</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody id="employees-tbody"></tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      </section>
-    </main>
-  </div>
-
-  <!-- INVOICE MODAL -->
-  <div class="modal-bg" id="invoice-modal">
-    <div class="modal invoice-modal-shell">
-      <div class="create-invoice-head">
-        <div class="create-title">
-          <button class="back-btn" title="Close" onclick="closeModal()"><i class="ti ti-chevron-left"></i></button>
-          <div>
-            <h2 id="modal-title">Create Invoice</h2>
-            <small>BillPro</small>
-          </div>
-        </div>
-        <div style="display:flex;align-items:center;gap:18px">
-          <div class="bill-number">
-            <input type="text" id="f-bill-prefix" value="INV-" aria-label="Invoice prefix">
-            <input type="text" id="f-billno" placeholder="2" aria-label="Invoice number">
-          </div>
-          <button class="btn primary invoice-save-top" onclick="saveEntry()">Save <i
-              class="ti ti-arrow-right"></i></button>
-        </div>
-      </div>
-
-      <div class="invoice-create-body">
-        <div class="invoice-top-grid">
-          <div class="soft-panel">
-            <div class="panel-label-row">
-              <label id="party-label" for="f-party">Select Customer</label>
-              <button class="link-btn" onclick="openPartyModal('customer')">+ Create Customer</button>
-            </div>
-            <input type="text" id="f-party" list="party-list" placeholder="Search customers...">
-            <datalist id="party-list"></datalist>
-            <input type="hidden" id="f-phone">
-          </div>
-          <div class="soft-panel neutral">
-            <div class="invoice-fields">
-              <div class="form-group"><label>Invoice Date</label><input type="date" id="f-date"></div>
-              <div class="form-group"><label>Due Date</label><input type="date" id="f-due"></div>
-              <div class="form-group"><label>Reference</label><input type="text" id="f-notes"
-                  placeholder="Reference note (optional)"></div>
-            </div>
-          </div>
-        </div>
-
-        <datalist id="product-list"></datalist>
-
-        <div class="product-entry">
-          <!-- Quick add row -->
-          <div class="quick-add-row">
-            <input type="text" placeholder="Filter Category">
-            <input type="text" list="product-list" id="quick-product" placeholder="Search product...">
-            <input type="number" id="quick-qty" min="1" value="1" placeholder="Qty">
-            <button class="btn primary" onclick="addQuickProduct()"><i class="ti ti-plus"></i>Add to Bill</button>
-          </div>
-
-          <!-- Items table -->
-          <div class="table-wrap">
-            <table class="items-table">
-              <thead>
-                <tr>
-                  <th style="width:35%">Product Name</th>
-                  <th style="width:12%">Quantity</th>
-                  <th style="width:15%">Unit</th>
-                  <th style="width:18%">Unit Price</th>
-                  <th style="width:15%">GST%</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody id="items-body"></tbody>
-            </table>
-          </div>
-
-          <!-- Add custom item + stock chips -->
-          <div style="display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap">
-            <button class="btn sm" onclick="addItemRow()"><i class="ti ti-plus"></i>Add Custom Item</button>
-          </div>
-          <div class="stock-chips" id="stock-chip-list"></div>
-
-        </div><!-- end product-entry -->
-
-        <!-- Totals -->
-        <div class="total-section" id="totals-section">
-          <div class="total-row"><span>Subtotal</span><span id="t-sub">₹0</span></div>
-          <div class="total-row"><span>GST</span><span id="t-gst">₹0</span></div>
-          <div class="total-row grand"><span>Total</span><span id="t-total">₹0</span></div>
-        </div>
-
-        <div class="form-row" style="margin-top:18px">
-          <div class="form-group">
-            <label>Payment Status</label>
-            <select id="f-status">
-              <option value="pending">Pending</option>
-              <option value="paid">Paid</option>
-              <option value="cancelled">Cancelled</option>
-            </select>
-          </div>
-          <div></div>
-        </div>
-
-      </div><!-- end invoice-create-body -->
+  <div class="header">
+    <div class="header-icon">📦</div>
+    <div>
+      <h1>Barcode Scanner</h1>
+      <p>Scan karo → OK dabao → Sheet mein jayega</p>
     </div>
   </div>
 
-  <!-- PARTY MODAL -->
-  <div class="modal-bg" id="party-modal">
-    <div class="modal" style="width:440px">
-      <div class="modal-head">
-        <h2 id="party-modal-title">Add Customer</h2><button class="btn sm icon" onclick="closePartyModal()"><i
-            class="ti ti-x"></i></button>
-      </div>
-      <div class="modal-body">
-        <div class="form-group" style="margin-bottom:12px"><label>Name</label><input type="text" id="p-name"
-            placeholder="Full name / company"></div>
-        <div class="form-group" style="margin-bottom:12px"><label>Phone</label><input type="text" id="p-phone"
-            placeholder="Mobile number"></div>
-        <div class="form-group" style="margin-bottom:12px"><label>GSTIN</label><input type="text" id="p-gstin"
-            placeholder="15-digit GSTIN (optional)"></div>
-        <div class="form-group"><label>Address</label><input type="text" id="p-address" placeholder="City, State"></div>
-      </div>
-      <div class="modal-footer"><button class="btn" onclick="closePartyModal()">Cancel</button><button
-          class="btn primary" onclick="saveParty()"><i class="ti ti-device-floppy"></i>Save</button></div>
-    </div>
-  </div>
+  <div class="camera-wrap" id="camera-wrap" style="display:none;">
+    <video id="video" autoplay muted playsinline></video>
+    <canvas id="canvas"></canvas>
 
-  <!-- PRODUCT MODAL -->
-  <div class="modal-bg" id="product-modal">
-    <div class="modal" style="width:560px">
-      <div class="modal-head">
-        <h2 id="product-modal-title">Add Product</h2><button class="btn sm icon" onclick="closeProductModal()"><i
-            class="ti ti-x"></i></button>
-      </div>
-      <div class="modal-body">
-        <div class="form-row">
-          <div class="form-group"><label>Product Name</label><input type="text" id="pr-name"
-              placeholder="Product / service name"></div>
-          <div class="form-group"><label>Unit</label><input type="text" id="pr-unit" placeholder="pcs, kg, box"></div>
-        </div>
-        <div class="form-row">
-          <div class="form-group"><label>Sale Price</label><input type="number" id="pr-sale" min="0" placeholder="0">
-          </div>
-          <div class="form-group"><label>Purchase Price</label><input type="number" id="pr-purchase" min="0"
-              placeholder="0"></div>
-        </div>
-        <div class="form-row" style="margin-bottom:0">
-          <div class="form-group"><label>GST %</label><input type="number" id="pr-gst" min="0" max="100"
-              placeholder="18"></div>
-          <div class="form-group"><label>Opening Stock</label><input type="number" id="pr-stock" min="0"
-              placeholder="0"></div>
-        </div>
-      </div>
-      <div class="modal-footer"><button class="btn" onclick="closeProductModal()">Cancel</button><button
-          class="btn primary" onclick="saveProduct()"><i class="ti ti-device-floppy"></i>Save</button></div>
+    <div class="scan-overlay">
+      <div class="corner tl" id="c-tl"></div>
+      <div class="corner tr" id="c-tr"></div>
+      <div class="corner bl" id="c-bl"></div>
+      <div class="corner br" id="c-br"></div>
+      <div class="laser" id="laser"></div>
     </div>
-  </div>
 
-  <!-- CUSTOMER LEDGER MODAL -->
-  <div class="modal-bg" id="customer-ledger-modal">
-    <div class="modal" style="width:920px">
-      <div class="modal-head">
-        <h2 id="ledger-title">Customer Record</h2><button class="btn sm icon" onclick="closeCustomerLedger()"><i
-            class="ti ti-x"></i></button>
-      </div>
-      <div class="modal-body">
-        <div class="form-row">
-          <div class="form-group"><label>Month</label><input type="month" id="ledger-month"
-              onchange="renderCustomerLedger()"></div>
-          <div class="form-group"><label>Year</label><select id="ledger-year"
-              onchange="renderCustomerLedger()"></select></div>
-        </div>
-        <div class="summary-grid" id="ledger-summary"></div>
-        <div class="card">
-          <div class="table-wrap">
-            <table id="ledger-table">
-              <thead>
-                <tr>
-                  <th>#</th>
-                  <th>Invoice No</th>
-                  <th>Date</th>
-                  <th>Items</th>
-                  <th>Total</th>
-                  <th>Status</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody id="ledger-tbody"></tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-      <div class="modal-footer"><button class="btn" onclick="clearLedgerFilter()">All Records</button><button
-          class="btn" onclick="closeCustomerLedger()">Close</button></div>
-    </div>
-  </div>
+    <!-- Torch button -->
+    <button class="torch-btn" id="torch-btn" onclick="toggleTorch()">🔦</button>
 
-  <!-- INVOICE VIEW MODAL -->
-  <div class="modal-bg" id="invoice-view-modal">
-    <div class="modal" style="width:820px">
-      <div class="modal-head">
-        <h2>Invoice View</h2><button class="btn sm icon" onclick="closeInvoiceView()"><i class="ti ti-x"></i></button>
-      </div>
-      <div class="modal-body" id="print-area">
-        <div class="invoice-paper" id="invoice-preview"></div>
-      </div>
-      <div class="modal-footer"><button class="btn" onclick="closeInvoiceView()">Close</button><button
-          class="btn primary" onclick="printInvoice()"><i class="ti ti-printer"></i>Print</button></div>
-    </div>
-  </div>
+    <div class="scan-hint" id="scan-hint">📷 Poore frame mein barcode rakhein</div>
+    <div class="engine-badge" id="engine-badge">⚡ Loading...</div>
+    <div class="zoom-badge" id="zoom-badge">🔍 Zoom: 1x</div>
 
-  <!-- PREMIUM PAYMENT MODAL -->
-  <div class="modal-bg" id="premium-modal">
-    <div class="modal premium-modal-shell">
-      <div class="premium-hero">
-        <i class="ti ti-crown"></i>
-        <h2>Employee Premium Access</h2>
-        <p>Apne employees ko bhi app ka access dein</p>
-      </div>
-      <div class="premium-price">
-        <div class="amount">₹50<small>/month</small></div>
-        <p style="color:var(--muted);font-size:13px;margin-top:6px">Per employee, per month</p>
-      </div>
-      <div class="premium-features">
-        <ul>
-          <li><i class="ti ti-check"></i>Employee sirf Sale aur Purchase use kar sakta hai</li>
-          <li><i class="ti ti-check"></i>Dashboard, Products, Customers, Vendors ka access nahi</li>
-          <li><i class="ti ti-check"></i>Admin ka poora control bana rahega</li>
-          <li><i class="ti ti-check"></i>Employee ka alag login username & password</li>
-          <li><i class="ti ti-check"></i>Secure — edit/delete pe password check</li>
-        </ul>
-      </div>
-      <div class="premium-actions">
-        <button class="btn premium-pay" onclick="activateEmployeeAccess()"><i class="ti ti-lock-open"></i>Activate
-          Employee Access — ₹50/mo</button>
-        <button class="btn" onclick="closePremiumModal()" style="width:100%">Baad mein karein</button>
+    <div class="confirm-overlay" id="confirm-overlay">
+      <div class="confirm-label">✅ Barcode mila!</div>
+      <div class="confirm-code" id="confirm-code">—</div>
+      <div class="confirm-btns">
+        <button class="btn-ok" onclick="confirmAndSend()">✔ OK</button>
+        <button class="btn-retry" onclick="retryCamera()">↩ Dobara</button>
       </div>
     </div>
   </div>
 
-  <!-- PAYMENT MODAL -->
-  <div class="modal-bg" id="payment-modal">
-    <div class="modal" style="width:400px; text-align:center;">
-      <div class="modal-head"
-        style="justify-content:center; background:linear-gradient(135deg,#ff9500,#ff5e00); color:#fff; border-bottom:none; border-radius:8px 8px 0 0;">
-        <h2 style="font-size:20px; font-weight:800; display:flex; align-items:center; gap:8px;">
-          <i class="ti ti-credit-card"></i> Premium Payment
-        </h2>
+  <div class="panel">
+    <button class="btn-camera" id="camera-btn" onclick="toggleCamera()">
+      📷 Camera Kholo aur Scan Karo
+    </button>
+    <div class="status-pill" id="status-pill"></div>
+    <div class="divider">YA MANUALLY TYPE KARO</div>
+    <div>
+      <label class="field-label">Barcode</label>
+      <input type="text" id="barcode-input" placeholder="Yahan type ya scan karo..."
+        onkeydown="if(event.key==='Enter') sendManual()">
+    </div>
+    <div>
+      <label class="field-label">Quantity</label>
+      <input type="number" id="qty-input" value="1" min="1">
+    </div>
+    <button class="btn-send" id="send-btn" onclick="sendManual()">
+      📤 Google Sheet mein Send Karo
+    </button>
+    <div>
+      <div class="log-header">
+        <span>Recent Scans</span>
+        <button onclick="clearLog()">Clear</button>
       </div>
-      <div class="modal-body" style="padding:24px;">
-        <div style="font-size:15px; color:var(--muted); margin-bottom:16px;">Scan QR to pay <strong>₹50</strong> for
-          Employee Access</div>
-        <div
-          style="background:#f7f9fb; border:1px dashed var(--line); border-radius:12px; padding:20px; display:inline-block; margin-bottom:20px;">
-          <svg width="150" height="150" viewBox="0 0 100 100" style="display:block; margin:0 auto;">
-            <rect width="100" height="100" fill="white" />
-            <rect x="5" y="5" width="25" height="25" fill="#333" />
-            <rect x="10" y="10" width="15" height="15" fill="white" />
-            <rect x="13" y="13" width="9" height="9" fill="#333" />
-            <rect x="70" y="5" width="25" height="25" fill="#333" />
-            <rect x="75" y="10" width="15" height="15" fill="white" />
-            <rect x="78" y="13" width="9" height="9" fill="#333" />
-            <rect x="5" y="70" width="25" height="25" fill="#333" />
-            <rect x="10" y="75" width="15" height="15" fill="white" />
-            <rect x="13" y="78" width="9" height="9" fill="#333" />
-            <rect x="35" y="5" width="10" height="10" fill="#333" />
-            <rect x="55" y="15" width="10" height="5" fill="#333" />
-            <rect x="40" y="25" width="20" height="10" fill="#333" />
-            <rect x="70" y="35" width="15" height="15" fill="#333" />
-            <rect x="35" y="50" width="25" height="15" fill="#333" />
-            <rect x="70" y="70" width="20" height="20" fill="#333" />
-            <rect x="45" y="80" width="15" height="10" fill="#333" />
-            <rect x="45" y="70" width="10" height="5" fill="#333" />
-            <rect x="85" y="55" width="10" height="10" fill="#333" />
-            <rect x="15" y="45" width="10" height="15" fill="#333" />
-          </svg>
-          <div style="font-size:12px; font-weight:700; color:#ff6b00; margin-top:10px;">UPI ID: 7210042800@kotakbank
-          </div>
-        </div>
-        <div style="text-align:left; display:flex; flex-direction:column; gap:12px;">
-          <div class="form-group">
-            <label>Card Number / UPI Transaction ID</label>
-            <input type="text" id="pay-transaction-id" placeholder="Enter UPI Ref No. or Card Number">
-          </div>
-        </div>
-        <div id="payment-status-message" style="margin-top:16px; font-weight:700; display:none;"></div>
-      </div>
-      <div class="modal-footer" style="background:#fbfcfd; justify-content:center; gap:12px;">
-        <button class="btn" onclick="closePaymentModal()" style="flex:1;">Cancel</button>
-        <button class="btn primary" id="pay-confirm-btn" onclick="submitPayment()"
-          style="flex:1; background:linear-gradient(135deg,#ff9500,#ff5e00); border-color:#ff5e00;">Pay ₹50</button>
+      <div id="log-list">
+        <p class="log-empty">Abhi koi scan nahi hua</p>
       </div>
     </div>
   </div>
-
-  <!-- EMPLOYEE LOGIN MODAL -->
-  <div class="modal-bg" id="emp-login-modal">
-    <div class="modal emp-login-modal-shell">
-      <div class="emp-login-hero">
-        <i class="ti ti-user-shield"></i>
-        <h2>Employee Login</h2>
-        <p>Employee User ID aur Password daalein</p>
-      </div>
-      <div class="modal-body">
-        <div class="form-group" style="margin-bottom:12px">
-          <label>Employee User ID</label>
-          <input type="text" id="emp-login-username" placeholder="User ID daalein">
-        </div>
-        <div class="form-group" style="margin-bottom:12px">
-          <label>Employee Password</label>
-          <input type="password" id="emp-login-pass" placeholder="Employee password daalein"
-            onkeydown="if(event.key==='Enter')employeeLogin()">
-        </div>
-        <p style="font-size:12px;color:var(--muted);margin-top:8px">⚠️ Employee sirf Sale Invoice aur Purchase Bill use
-          kar sakta hai. Baaki sections restricted hain.</p>
-        <button class="link-btn" onclick="resetEmployeeCredentialsPrompt()"
-          style="margin-top:12px; font-size:12px; color:var(--blue); font-weight:700;">⚙️ Setup / Change Credentials
-          (Requires Admin Password)</button>
-      </div>
-      <div class="modal-footer">
-        <button class="btn" onclick="closeEmpLoginModal()">Cancel</button>
-        <button class="btn primary" onclick="employeeLogin()"><i class="ti ti-login"></i>Login as Employee</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- EMPLOYEE PASSWORD SETUP MODAL -->
-  <div class="modal-bg" id="emp-setup-modal">
-    <div class="modal emp-login-modal-shell">
-      <div class="emp-login-hero" style="background:linear-gradient(135deg,#ff9500,#ff5e00)">
-        <i class="ti ti-key"></i>
-        <h2>Employee Credentials Setup</h2>
-        <p>Employee ke liye User ID aur Password banayein</p>
-      </div>
-      <div class="modal-body">
-        <div class="form-group" style="margin-bottom:12px">
-          <label>Employee User ID (Username)</label>
-          <input type="text" id="emp-setup-username" placeholder="Employee User ID (e.g. Rahul123)">
-        </div>
-        <div class="form-group" style="margin-bottom:12px">
-          <label>Naya Employee Password</label>
-          <input type="password" id="emp-setup-pass" placeholder="Employee password set karein">
-        </div>
-        <div class="form-group" style="margin-bottom:12px">
-          <label>Confirm Password</label>
-          <input type="password" id="emp-setup-confirm" placeholder="Password confirm karein"
-            onkeydown="if(event.key==='Enter')saveEmployeePassword()">
-        </div>
-        <p style="font-size:12px;color:var(--muted)">💡 Ye Credentials employee ko dein. Isse employee login karke kaam
-          kar payega.</p>
-      </div>
-      <div class="modal-footer">
-        <button class="btn" onclick="closeEmpSetupModal()">Cancel</button>
-        <button class="btn primary" onclick="saveEmployeePassword()"><i class="ti ti-device-floppy"></i>Save
-          Credentials</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- TOAST CONTAINER -->
-  <div class="toast-container" id="toast-container"></div>
 
   <script>
-    let currentType = 'sale';
-    let currentPartyType = 'customer';
-    let editIndex = -1;
-    let editPartyIndex = -1;
-    let editProductIndex = -1;
-    let activeLedgerCustomer = '';
-    let activeInvoice = null;
-    let currentUser = null;
-    let authMode = 'login';
-    let resetOtp = null, resetOtpUser = null, resetOtpExpiresAt = 0;
-    let isEmployeeMode = false;
-    const employeeAllowedPages = ['sales', 'purchase'];
+    const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzpwcg2U04A9yw2FnU8RJEwTevslXAHcbKaGBVMk6u-lUhIm3Lv4hJ-oY5dUQwF9XWc/exec';
 
-    const defaultStore = { sales: [], purchases: [], customers: [], vendors: [], products: [], _employeePaid: false, employees: [], adminEmail: '' };
-    const demoCustomerNames = ['Rahul Enterprises', 'Sharma Traders', 'Meena Store', 'Gupta Electronics', 'Aarav Retail'];
-    const demoVendorNames = ['Tech Distributors', 'Mobile World'];
-    const demoProductNames = ['Laptop', 'Mobile', 'Charger', 'Headphones', 'Laptop Stock', 'Phones'];
+    let stream         = null;
+    let scanning       = false;
+    let waitingOK      = false;
+    let pendingCode    = '';
+    let animFrameId    = null;
+    let torchOn        = false;
+    let videoTrack     = null;
+    const logEntries   = [];
 
-    let store = structuredClone(defaultStore);
-    let invoiceCounters = { sale: 1, purchase: 1 };
+    // Auto zoom state
+    const ZOOM_LEVELS  = [1, 1.5, 2, 2.5, 1]; // cycle: 1x → 1.5x → 2x → 2.5x → back to 1x
+    let zoomIndex      = 0;
+    let noScanFrames   = 0;
+    const ZOOM_TRIGGER = 40; // frames ke baad zoom badha do (~2 sec at 20fps)
 
-    window._fbLoadStore = async function () {
-      try {
-        const { doc, getDoc } = window._fbFns;
-        const ref = doc(window._fbDb, 'users', currentUser);
-        const snap = await getDoc(ref);
-        if (snap.exists()) {
-          const parsed = snap.data();
-          store = removeDemoData({
-            sales: Array.isArray(parsed.sales) ? parsed.sales : [],
-            purchases: Array.isArray(parsed.purchases) ? parsed.purchases : [],
-            customers: Array.isArray(parsed.customers) ? parsed.customers : [],
-            vendors: Array.isArray(parsed.vendors) ? parsed.vendors : [],
-            products: Array.isArray(parsed.products) ? parsed.products : [],
-            _employeePaid: parsed._employeePaid || false,
-            employees: Array.isArray(parsed.employees) ? parsed.employees : [],
-            adminEmail: parsed.adminEmail || ''
-          });
-        } else {
-          store = structuredClone(defaultStore);
-        }
-      } catch (e) {
-        console.warn('Firebase load error:', e);
-        store = structuredClone(defaultStore);
-      }
-    };
+    const useNative    = ('BarcodeDetector' in window);
+    let nativeDetector = null;
+    let zxingReader    = null;
 
-    function removeDemoData(data) {
-      data.sales = data.sales.filter(r => !demoCustomerNames.includes(r.party));
-      data.purchases = data.purchases.filter(r => !demoVendorNames.includes(r.party));
-      data.customers = data.customers.filter(r => !demoCustomerNames.includes(r.name));
-      data.vendors = data.vendors.filter(r => !demoVendorNames.includes(r.name));
-      data.products = data.products.filter(r => !demoProductNames.includes(r.name));
-      return data;
-    }
-
-    async function saveData() {
-      if (!currentUser || !window._fbDb) return;
-      try {
-        const { doc, setDoc } = window._fbFns;
-        await setDoc(doc(window._fbDb, 'users', currentUser), { ...store, invoiceCounters, adminEmail: window._fbCurrentEmail }, { merge: true });
-      } catch (e) { console.warn('Firestore save error:', e); }
-    }
-
-    async function verifyActionPassword(actionLabel = 'action') {
-      if (!currentUser) { alert('Pehle login karein'); return false; }
-      const entered = prompt(`${actionLabel} karne ke liye password daalein:`);
-      if (!entered) return false;
-
-      if (isEmployeeMode) {
-        const empUsername = localStorage.getItem('emp_session_username');
-        if (!empUsername || !store.employees) return false;
-        const employee = store.employees.find(e => e.username.toLowerCase() === empUsername.toLowerCase());
-        if (employee && entered === employee.password) {
-          return true;
-        } else {
-          alert('Galat employee password!');
-          return false;
-        }
+    async function initDetector() {
+      if (useNative) {
+        nativeDetector = new BarcodeDetector({
+          formats: ['ean_13','ean_8','code_128','code_39',
+                    'qr_code','upc_a','upc_e','data_matrix','itf','codabar']
+        });
+        document.getElementById('engine-badge').textContent = '⚡ Native Fast';
+        document.getElementById('engine-badge').style.color = '#00ff88';
       } else {
-        const user = window._fbAuth.currentUser;
-        if (!user) return false;
+        const ZXing = window.ZXing;
+        const hints = new Map();
+        hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
+          ZXing.BarcodeFormat.EAN_13, ZXing.BarcodeFormat.EAN_8,
+          ZXing.BarcodeFormat.CODE_128, ZXing.BarcodeFormat.CODE_39,
+          ZXing.BarcodeFormat.QR_CODE, ZXing.BarcodeFormat.UPC_A,
+          ZXing.BarcodeFormat.UPC_E, ZXing.BarcodeFormat.DATA_MATRIX,
+        ]);
+        hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+        zxingReader = new ZXing.BrowserMultiFormatReader(hints);
+        document.getElementById('engine-badge').textContent = '🔄 ZXing';
+        document.getElementById('engine-badge').style.color = '#ffcc00';
+      }
+    }
+
+    // ── Auto Zoom ─────────────────────────────────────
+    async function applyZoom(zoomVal) {
+      if (!videoTrack) return;
+      try {
+        const caps = videoTrack.getCapabilities();
+        if (caps.zoom) {
+          const minZ = caps.zoom.min || 1;
+          const maxZ = caps.zoom.max || 4;
+          const z = Math.min(Math.max(zoomVal, minZ), maxZ);
+          await videoTrack.applyConstraints({ advanced: [{ zoom: z }] });
+          const badge = document.getElementById('zoom-badge');
+          badge.textContent = '🔍 Zoom: ' + z + 'x';
+          badge.classList.add('show');
+          clearTimeout(applyZoom._t);
+          applyZoom._t = setTimeout(() => badge.classList.remove('show'), 1500);
+        }
+      } catch(e) {}
+    }
+
+    function autoZoomStep() {
+      noScanFrames++;
+      if (noScanFrames >= ZOOM_TRIGGER) {
+        noScanFrames = 0;
+        zoomIndex = (zoomIndex + 1) % ZOOM_LEVELS.length;
+        applyZoom(ZOOM_LEVELS[zoomIndex]);
+      }
+    }
+
+    function resetZoom() {
+      noScanFrames = 0;
+      zoomIndex    = 0;
+      applyZoom(1);
+    }
+
+    // ── Torch ─────────────────────────────────────────
+    async function toggleTorch() {
+      if (!videoTrack) return;
+      try {
+        torchOn = !torchOn;
+        await videoTrack.applyConstraints({ advanced: [{ torch: torchOn }] });
+        const btn = document.getElementById('torch-btn');
+        btn.textContent = torchOn ? '🔦' : '🔦';
+        btn.classList.toggle('on', torchOn);
+      } catch(e) {
+        showStatus('warn', '⚠️ Torch support nahi hai is device mein');
+        torchOn = false;
+      }
+    }
+
+    // ── Camera Toggle ─────────────────────────────────
+    async function toggleCamera() {
+      if (stream) { stopCamera(); return; }
+      const btn = document.getElementById('camera-btn');
+      btn.textContent = '⏳ Camera shuru ho raha hai...';
+      btn.disabled = true;
+      try {
+        await initDetector();
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: { ideal: 'environment' },
+            width:  { ideal: 1920 },
+            height: { ideal: 1080 },
+          }
+        });
+        const video = document.getElementById('video');
+        video.srcObject = stream;
+        await video.play();
+
+        // Get video track for zoom + torch
+        videoTrack = stream.getVideoTracks()[0];
+
+        // Check torch support
         try {
-          await window._fbFns.signInWithEmailAndPassword(window._fbAuth, user.email, entered);
-          return true;
-        } catch (e) {
-          alert('Galat admin password!');
-          return false;
-        }
+          const caps = videoTrack.getCapabilities();
+          if (caps.torch) {
+            document.getElementById('torch-btn').classList.add('show');
+          }
+        } catch(e) {}
+
+        document.getElementById('camera-wrap').style.display = 'block';
+        btn.textContent = '🛑 Camera Band Karo';
+        btn.classList.add('off');
+        btn.disabled = false;
+        startScanning();
+      } catch (err) {
+        showStatus('error', '❌ Camera nahi khula: ' + err.message);
+        btn.textContent = '📷 Camera Kholo aur Scan Karo';
+        btn.disabled = false;
       }
     }
 
-    function setAuthMode(mode) {
-      authMode = mode;
-      const isSignup = mode === 'signup', isForgot = mode === 'forgot';
-      document.getElementById('auth-title').textContent = isForgot ? 'Password Reset' : (isSignup ? 'Account Banayein' : 'Login');
-      document.getElementById('auth-copy').textContent = isForgot ? 'Apni registered email daalein.' : (isSignup ? 'Email aur password daalein.' : 'Email aur password se login karein.');
-      document.getElementById('auth-main-btn').textContent = isForgot ? 'Reset Link Bhejein' : (isSignup ? 'Account Banayein' : 'Login');
-      document.getElementById('auth-main-btn').setAttribute('onclick', isForgot ? 'resetPassword()' : (isSignup ? 'createAccount()' : 'login()'));
-      document.getElementById('auth-switch-btn').textContent = (isSignup || isForgot) ? 'Login par Wapas' : 'Naya Account';
-      document.getElementById('auth-switch-btn').setAttribute('onclick', (isSignup || isForgot) ? "setAuthMode('login')" : "setAuthMode('signup')");
-      document.getElementById('forgot-btn').style.display = isForgot ? 'none' : 'inline-flex';
-      document.getElementById('auth-question-row').style.display = 'none';
-      document.getElementById('auth-answer-row').style.display = 'none';
-      document.getElementById('auth-otp-row').style.display = 'none';
-      document.getElementById('auth-pass').style.display = isForgot ? 'none' : 'block';
+    function stopCamera() {
+      scanning  = false;
+      waitingOK = false;
+      if (animFrameId) { cancelAnimationFrame(animFrameId); animFrameId = null; }
+      if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+      videoTrack = null; torchOn = false;
+      document.getElementById('video').srcObject = null;
+      document.getElementById('camera-wrap').style.display = 'none';
+      document.getElementById('confirm-overlay').classList.remove('show');
+      document.getElementById('torch-btn').classList.remove('show','on');
+      setFoundUI(false);
+      const btn = document.getElementById('camera-btn');
+      btn.textContent = '📷 Camera Kholo aur Scan Karo';
+      btn.classList.remove('off');
+      btn.disabled = false;
     }
 
-    async function createAccount() {
-      const email = document.getElementById('auth-email').value.trim().toLowerCase();
-      const password = document.getElementById('auth-pass').value;
-      if (!email || !password) { alert('Email aur password daalein'); return; }
-      try {
-        await window._fbFns.createUserWithEmailAndPassword(window._fbAuth, email, password);
-      } catch (e) {
-        const msgs = { 'auth/email-already-in-use': 'Ye email pehle se registered hai.', 'auth/weak-password': 'Password 6+ characters ka hona chahiye.', 'auth/invalid-email': 'Email sahi format mein daalein.' };
-        alert(msgs[e.code] || 'Account nahi bana: ' + e.message);
-      }
+    function setFoundUI(found) {
+      ['c-tl','c-tr','c-bl','c-br'].forEach(id =>
+        document.getElementById(id).classList.toggle('found', found));
+      document.getElementById('laser').classList.toggle('found', found);
     }
 
-    async function login() {
-      const email = document.getElementById('auth-email').value.trim().toLowerCase();
-      const password = document.getElementById('auth-pass').value;
-      if (!email || !password) { alert('Email aur password daalein'); return; }
-      try {
-        await window._fbFns.signInWithEmailAndPassword(window._fbAuth, email, password);
-      } catch (e) {
-        const msgs = { 'auth/user-not-found': 'Ye email registered nahi hai.', 'auth/wrong-password': 'Password galat hai.', 'auth/invalid-credential': 'Email ya password galat hai.', 'auth/too-many-requests': 'Zyada attempts. Thodi der baad try karein.' };
-        alert(msgs[e.code] || 'Login nahi hua: ' + e.message);
-      }
+    function startScanning() {
+      scanning    = true;
+      waitingOK   = false;
+      pendingCode = '';
+      document.getElementById('confirm-overlay').classList.remove('show');
+      setFoundUI(false);
+      document.getElementById('scan-hint').style.display = 'block';
+      resetZoom();
+      if (useNative) scanNative();
+      else scanZXing();
     }
 
-    async function resetPassword() {
-      const email = document.getElementById('auth-email').value.trim().toLowerCase();
-      if (!email) { alert('Apni registered email daalein'); return; }
-      try {
-        await window._fbFns.sendPasswordResetEmail(window._fbAuth, email);
-        alert('Password reset link bhej diya gaya. Inbox check karein.');
-        setAuthMode('login');
-      } catch (e) { alert('Reset link nahi bheja: ' + e.message); }
-    }
-
-    async function logout() {
-      if (localStorage.getItem('emp_session_admin_uid')) {
-        logoutEmployee();
-      } else {
-        await window._fbFns.signOut(window._fbAuth);
-      }
-    }
-
-    function loadSavedStore() { return structuredClone(defaultStore); }
-
-    function getNextCounter(prefix, rows) {
-      const numbers = rows.map(row => {
-        const match = String(row.invoiceNo || '').match(new RegExp('^' + prefix + '0*(\\d+)$'));
-        return match ? Number(match[1]) : 0;
-      });
-      return Math.max(0, ...numbers) + 1;
-    }
-
-    function loadInvoiceCounters() {
-      return { sale: getNextCounter('INV-', store.sales), purchase: getNextCounter('PUR-', store.purchases) };
-    }
-
-    invoiceCounters = loadInvoiceCounters();
-
-    function calcItem(i) {
-      const qty = parseFloat(i.qty) || 0, price = parseFloat(i.price) || 0, gst = parseFloat(i.gst) || 0;
-      const sub = qty * price;
-      return { sub, tax: sub * gst / 100, total: sub * (1 + gst / 100) };
-    }
-    function calcTotals(items) {
-      let s = 0, g = 0;
-      items.forEach(i => { const c = calcItem(i); s += c.sub; g += c.tax; });
-      return { sub: s, gst: g, total: s + g };
-    }
-    function fmt(n) { return '₹' + Math.round(n).toLocaleString('en-IN'); }
-    function esc(v) { return String(v ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch])); }
-    function niceDate(date) {
-      if (!date) return '-';
-      return new Date(date + 'T00:00:00').toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
-    }
-
-    function showPage(id, el) {
-      // Employee mode mein sirf sales aur purchase allowed, others give no response
-      if (isEmployeeMode && !employeeAllowedPages.includes(id)) {
+    // ── Native BarcodeDetector ────────────────────────
+    async function scanNative() {
+      if (!scanning || waitingOK || !stream) return;
+      const video = document.getElementById('video');
+      if (video.readyState < 2) {
+        animFrameId = requestAnimationFrame(scanNative);
         return;
       }
-      document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-      document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-      document.getElementById('page-' + id).classList.add('active');
-      el.classList.add('active');
-      const titles = { dashboard: 'Dashboard', sales: 'Sale Invoices', purchase: 'Purchase Bills', customers: 'Customers', products: 'Products', vendors: 'Vendors', employees: 'Employees' };
-      const subtitles = { dashboard: 'Business ka quick snapshot', sales: 'Customer invoices manage karein', purchase: 'Vendor bills track karein', customers: 'Customer directory', products: 'Product master aur rate list', vendors: 'Vendor directory', employees: 'Manage and monitor employees' };
-      document.getElementById('page-title').textContent = titles[id];
-      document.getElementById('page-subtitle').textContent = subtitles[id];
-      if (id === 'dashboard') renderDashboard();
-      if (id === 'sales') renderTable('sales');
-      if (id === 'purchase') renderTable('purchase');
-      if (id === 'customers') renderParties('customers');
-      if (id === 'products') renderProducts();
-      if (id === 'vendors') renderParties('vendors');
-      if (id === 'employees') renderEmployees();
+      try {
+        const barcodes = await nativeDetector.detect(video);
+        if (barcodes.length > 0) {
+          resetZoom();
+          onBarcodeFound(barcodes[0].rawValue);
+          return;
+        } else {
+          autoZoomStep(); // koi barcode nahi mila — zoom badha
+        }
+      } catch(e) {}
+      animFrameId = requestAnimationFrame(scanNative);
     }
 
-    function renderDashboard() {
-      const sTotal = store.sales.reduce((a, s) => a + calcTotals(s.items).total, 0);
-      const pTotal = store.purchases.reduce((a, p) => a + calcTotals(p.items).total, 0);
-      const paid = store.sales.filter(s => s.status === 'paid').reduce((a, s) => a + calcTotals(s.items).total, 0);
-      const pending = store.sales.filter(s => s.status === 'pending').reduce((a, s) => a + calcTotals(s.items).total, 0);
-      document.getElementById('dash-stats').innerHTML = `
-        <div class="stat-card sales"><div class="stat-top"><span class="stat-label">Total Sales</span><i class="ti ti-trending-up"></i></div><div class="stat-val blue">${fmt(sTotal)}</div></div>
-        <div class="stat-card purchase"><div class="stat-top"><span class="stat-label">Total Purchases</span><i class="ti ti-package-import"></i></div><div class="stat-val amber">${fmt(pTotal)}</div></div>
-        <div class="stat-card collected"><div class="stat-top"><span class="stat-label">Collected</span><i class="ti ti-circle-check"></i></div><div class="stat-val green">${fmt(paid)}</div></div>
-        <div class="stat-card pending"><div class="stat-top"><span class="stat-label">Pending</span><i class="ti ti-clock"></i></div><div class="stat-val red">${fmt(pending)}</div></div>`;
-      document.querySelector('#dash-sales-table tbody').innerHTML = store.sales.slice(-3).reverse().map(s => `<tr><td>${s.party}</td><td class="cell-strong">${fmt(calcTotals(s.items).total)}</td><td>${badge(s.status)}</td></tr>`).join('');
-      document.querySelector('#dash-purchase-table tbody').innerHTML = store.purchases.slice(-3).reverse().map(p => `<tr><td>${p.party}</td><td class="cell-strong">${fmt(calcTotals(p.items).total)}</td><td>${badge(p.status)}</td></tr>`).join('');
+    // ── ZXing Fallback ────────────────────────────────
+    function scanZXing() {
+      if (!scanning || waitingOK || !stream) return;
+      const video  = document.getElementById('video');
+      const canvas = document.getElementById('canvas');
+      if (video.readyState < 2) { setTimeout(scanZXing, 100); return; }
+
+      canvas.width  = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(video, 0, 0);
+
+      try {
+        const ZXing  = window.ZXing;
+        const lum    = new ZXing.HTMLCanvasElementLuminanceSource(canvas);
+        const bitmap = new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(lum));
+        try {
+          const result = zxingReader.decodeBitmap(bitmap);
+          if (result && result.getText()) {
+            resetZoom();
+            onBarcodeFound(result.getText());
+            return;
+          } else {
+            autoZoomStep();
+          }
+        } catch(e) { autoZoomStep(); }
+      } catch(e) {}
+      setTimeout(scanZXing, 80);
     }
 
-    function badge(s) { return `<span class="badge ${s}">${s.charAt(0).toUpperCase() + s.slice(1)}</span>`; }
-
-    function renderTable(type) {
-      const data = store[type === 'sales' ? 'sales' : 'purchases'];
-      const tbody = document.getElementById(type === 'sales' ? 'sales-tbody' : 'purchase-tbody');
-      if (!data.length) { tbody.innerHTML = `<tr><td colspan="8" class="empty">Koi entry nahi. Naya ${type === 'sales' ? 'Invoice' : 'Bill'} banayein.</td></tr>`; return; }
-      tbody.innerHTML = data.map((r, i) => {
-        const t = calcTotals(r.items);
-        return `<tr>
-          <td>${i + 1}</td><td class="cell-strong">${r.invoiceNo}</td><td>${r.party}</td>
-          <td>${r.date}</td><td>${r.items.length} item${r.items.length > 1 ? 's' : ''}</td>
-          <td class="cell-strong">${fmt(t.total)}</td><td>${badge(r.status)}</td>
-          <td>
-            <button class="btn sm icon" title="View" onclick="openInvoiceView('${type}',${i})"><i class="ti ti-eye"></i></button>
-            <button class="btn sm icon" title="Edit" onclick="editEntry(${i},'${type}')"><i class="ti ti-edit"></i></button>
-            <button class="btn sm icon danger" title="Delete" onclick="deleteEntry(${i},'${type}')"><i class="ti ti-trash"></i></button>
-          </td>
-        </tr>`;
-      }).join('');
+    // ── Barcode Found ─────────────────────────────────
+    function onBarcodeFound(code) {
+      waitingOK   = true;
+      pendingCode = code;
+      if (navigator.vibrate) navigator.vibrate([60, 40, 60]);
+      setFoundUI(true);
+      document.getElementById('scan-hint').style.display = 'none';
+      document.getElementById('confirm-code').textContent = code;
+      document.getElementById('confirm-overlay').classList.add('show');
+      document.getElementById('barcode-input').value = code;
     }
 
-    function renderParties(type) {
-      const isC = type === 'customers';
-      const data = isC ? store.customers : store.vendors;
-      const tbody = document.getElementById(type + '-tbody');
-      const bills = isC ? store.sales : store.purchases;
-      if (!data.length) { tbody.innerHTML = `<tr><td colspan="7" class="empty">Koi ${isC ? 'customer' : 'vendor'} nahi. Abhi add karein.</td></tr>`; return; }
-      tbody.innerHTML = data.map((p, i) => {
-        const related = bills.filter(b => b.party === p.name);
-        const total = related.reduce((a, b) => a + calcTotals(b.items).total, 0);
-        const actions = isC
-          ? `<button class="btn sm" onclick="openCustomerLedgerByIndex(${i})"><i class="ti ti-eye"></i>View</button> <button class="btn sm icon danger" onclick="deleteParty(${i},'customers')"><i class="ti ti-trash"></i></button>`
-          : `<button class="btn sm icon danger" onclick="deleteParty(${i},'vendors')"><i class="ti ti-trash"></i></button>`;
-        return `<tr><td>${i + 1}</td><td class="cell-strong">${p.name}</td><td>${p.phone || '-'}</td><td>${p.gstin || '-'}</td><td>${related.length}</td><td class="cell-strong">${fmt(total)}</td><td>${actions}</td></tr>`;
-      }).join('');
+    async function confirmAndSend() {
+      const code = pendingCode;
+      const qty  = parseInt(document.getElementById('qty-input').value) || 1;
+      if (!code) return;
+      document.getElementById('confirm-overlay').classList.remove('show');
+      showStatus('sending', '⏳ Sheet mein bhej raha hai...');
+      await doSend(code, qty);
+      startScanning();
     }
 
-    function renderProducts() {
-      const tbody = document.getElementById('products-tbody');
-      if (!store.products.length) { tbody.innerHTML = '<tr><td colspan="8" class="empty">Koi product nahi. Abhi add karein.</td></tr>'; return; }
-      tbody.innerHTML = store.products.map((p, i) => `<tr>
-        <td>${i + 1}</td><td class="cell-strong">${p.name}</td><td>${p.unit || '-'}</td>
-        <td class="cell-strong">${fmt(p.salePrice || 0)}</td><td>${fmt(p.purchasePrice || 0)}</td>
-        <td>${p.gst || 0}%</td>
-        <td style="color:${(p.stock || 0) <= 0 ? 'var(--red)' : (p.stock || 0) <= 5 ? 'var(--amber)' : 'var(--green)'}"><strong>${p.stock || 0}</strong></td>
-        <td>
-          <button class="btn sm icon" title="Edit" onclick="openProductModal(${i})"><i class="ti ti-edit"></i></button>
-          <button class="btn sm icon danger" title="Delete" onclick="deleteProduct(${i})"><i class="ti ti-trash"></i></button>
-        </td>
-      </tr>`).join('');
+    function retryCamera() {
+      document.getElementById('barcode-input').value = '';
+      startScanning();
     }
 
-    function updateProductList() {
-      document.getElementById('product-list').innerHTML = store.products.map(p =>
-        `<option value="${p.name}">Stock: ${p.stock || 0} | ${fmt(p.salePrice || 0)} / ${p.unit || 'unit'}</option>`
+    async function sendManual() {
+      const code = document.getElementById('barcode-input').value.trim();
+      const qty  = parseInt(document.getElementById('qty-input').value) || 1;
+      if (!code) { showStatus('warn', '⚠️ Pehle barcode type karo!'); return; }
+      const btn = document.getElementById('send-btn');
+      btn.disabled = true;
+      showStatus('sending', '⏳ Bhej raha hai...');
+      await doSend(code, qty);
+      document.getElementById('barcode-input').value = '';
+      document.getElementById('qty-input').value = 1;
+      btn.disabled = false;
+    }
+
+    async function doSend(barcode, qty) {
+      const datetime = new Date().toLocaleString('en-IN', {
+        day: '2-digit', month: '2-digit', year: 'numeric',
+        hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true
+      });
+      try {
+        await fetch(APPS_SCRIPT_URL, {
+          method: 'POST', mode: 'no-cors',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ barcode, datetime, quantity: qty })
+        });
+        showStatus('success', '✅ Bheja: ' + barcode + '  (Qty: ' + qty + ')');
+        addLog(barcode, qty);
+      } catch (err) {
+        showStatus('error', '❌ Error: ' + err.message);
+      }
+    }
+
+    let stTimer = null;
+    function showStatus(type, msg) {
+      const pill = document.getElementById('status-pill');
+      pill.className = 'status-pill ' + type;
+      pill.textContent = msg;
+      pill.style.display = 'block';
+      clearTimeout(stTimer);
+      if (type !== 'sending') stTimer = setTimeout(() => { pill.style.display = 'none'; }, 3500);
+    }
+
+    function addLog(barcode, qty) {
+      logEntries.unshift({ barcode, qty });
+      if (logEntries.length > 30) logEntries.pop();
+      renderLog();
+    }
+    function clearLog() { logEntries.length = 0; renderLog(); }
+    function renderLog() {
+      const el = document.getElementById('log-list');
+      if (!logEntries.length) {
+        el.innerHTML = '<p class="log-empty">Abhi koi scan nahi hua</p>';
+        return;
+      }
+      el.innerHTML = logEntries.map(e =>
+        `<div class="log-item">
+          <span class="log-barcode">${esc(e.barcode)}</span>
+          <span class="log-meta">Qty: ${e.qty}</span>
+        </div>`
       ).join('');
-
-      const chipList = document.getElementById('stock-chip-list');
-      if (!chipList) return;
-      chipList.innerHTML = store.products.map(p => {
-        const stock = p.stock || 0;
-        const color = stock <= 0 ? 'var(--red)' : stock <= 5 ? 'var(--amber)' : 'var(--green)';
-        const label = stock <= 0 ? '⚠ Out of stock' : `Stock: ${stock}`;
-        return `<span onclick="quickAddChip('${p.name.replace(/'/g, "\\'")}',${p.salePrice || 0},'${(p.unit || 'pcs').replace(/'/g, "\\'")}',${p.gst || 0},${stock})"
-          style="display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border:1px solid var(--line);border-radius:8px;background:#fff;cursor:pointer;font-size:12px;font-weight:650;transition:background .15s"
-          onmouseover="this.style.background='#eef6ff'" onmouseout="this.style.background='#fff'">
-          <span style="font-weight:750;color:var(--text)">${p.name}</span>
-          <span style="color:${color};font-size:11px">${label}</span>
-        </span>`;
-      }).join('');
     }
-
-    function quickAddChip(name, price, unit, gst, stock) {
-      if (stock <= 0) { alert(`${name} out of stock hai!`); return; }
-      addItemRow({ name, qty: 1, unit, price, gst });
-      updateTotals();
-    }
-
-    function findProduct(name) {
-      return store.products.find(p => p.name.toLowerCase() === String(name).trim().toLowerCase());
-    }
-
-    function setupLedgerYears() {
-      const years = [...new Set(store.sales.map(s => new Date(s.date + 'T00:00:00').getFullYear()))].sort((a, b) => b - a);
-      const currentYear = new Date().getFullYear();
-      if (!years.includes(currentYear)) years.unshift(currentYear);
-      document.getElementById('ledger-year').innerHTML = '<option value="">All years</option>' + years.map(y => `<option value="${y}">${y}</option>`).join('');
-    }
-
-    function openCustomerLedgerByIndex(index) { openCustomerLedger(store.customers[index].name); }
-
-    function openCustomerLedger(customerName) {
-      activeLedgerCustomer = customerName;
-      setupLedgerYears();
-      document.getElementById('ledger-title').textContent = `${customerName} - Billing Record`;
-      document.getElementById('ledger-month').value = '';
-      document.getElementById('ledger-year').value = '';
-      renderCustomerLedger();
-      document.getElementById('customer-ledger-modal').classList.add('open');
-    }
-
-    function closeCustomerLedger() { document.getElementById('customer-ledger-modal').classList.remove('open'); }
-    function clearLedgerFilter() { document.getElementById('ledger-month').value = ''; document.getElementById('ledger-year').value = ''; renderCustomerLedger(); }
-
-    function filteredCustomerSales() {
-      const month = document.getElementById('ledger-month').value;
-      const year = document.getElementById('ledger-year').value;
-      return store.sales.map((invoice, index) => ({ invoice, index })).filter(({ invoice }) => {
-        if (invoice.party !== activeLedgerCustomer) return false;
-        if (month && !invoice.date.startsWith(month)) return false;
-        if (year && new Date(invoice.date + 'T00:00:00').getFullYear() !== Number(year)) return false;
-        return true;
-      });
-    }
-
-    function renderCustomerLedger() {
-      const rows = filteredCustomerSales();
-      const total = rows.reduce((a, r) => a + calcTotals(r.invoice.items).total, 0);
-      const pending = rows.filter(r => r.invoice.status === 'pending').reduce((a, r) => a + calcTotals(r.invoice.items).total, 0);
-      document.getElementById('ledger-summary').innerHTML = `
-        <div class="mini-stat"><span>Total Bills</span><strong>${rows.length}</strong></div>
-        <div class="mini-stat"><span>Total Billing</span><strong>${fmt(total)}</strong></div>
-        <div class="mini-stat"><span>Pending</span><strong>${fmt(pending)}</strong></div>`;
-      const tbody = document.getElementById('ledger-tbody');
-      if (!rows.length) { tbody.innerHTML = '<tr><td colspan="7" class="empty">Koi invoice nahi mila.</td></tr>'; return; }
-      tbody.innerHTML = rows.map((row, i) => {
-        const r = row.invoice, t = calcTotals(r.items);
-        return `<tr>
-          <td>${i + 1}</td><td class="cell-strong">${r.invoiceNo}</td><td>${niceDate(r.date)}</td>
-          <td>${r.items.length} item${r.items.length > 1 ? 's' : ''}</td><td class="cell-strong">${fmt(t.total)}</td><td>${badge(r.status)}</td>
-          <td><button class="btn sm" onclick="openInvoiceView('sales',${row.index})"><i class="ti ti-eye"></i>View</button></td>
-        </tr>`;
-      }).join('');
-    }
-
-    function invoiceHTML(type, index) {
-      const data = type === 'sales' ? store.sales : store.purchases;
-      const r = data[index];
-      const partyList = type === 'sales' ? store.customers : store.vendors;
-      const party = partyList.find(p => p.name === r.party) || {};
-      const totals = calcTotals(r.items);
-      const title = type === 'sales' ? 'SALE INVOICE' : 'PURCHASE BILL';
-      const billLabel = type === 'sales' ? 'Invoice No' : 'Bill No';
-      const rows = r.items.map((item, i) => {
-        const c = calcItem(item);
-        return `<tr><td>${i + 1}</td><td>${esc(item.name)}</td><td>${esc(item.qty)}</td><td>${esc(item.unit)}</td><td>${fmt(item.price)}</td><td>${esc(item.gst)}%</td><td class="cell-strong">${fmt(c.total)}</td></tr>`;
-      }).join('');
-      return `
-        <div class="invoice-head">
-          <div><h3>BillPro</h3><div>Business Billing</div><div>India</div></div>
-          <div class="invoice-meta"><strong>${title}</strong><br>${billLabel}: ${esc(r.invoiceNo)}<br>Date: ${niceDate(r.date)}<br>Due: ${niceDate(r.due)}<br>Status: ${esc(r.status)}</div>
-        </div>
-        <div class="invoice-party">
-          <div><span>Bill To</span><strong>${esc(r.party)}</strong><div>Phone: ${esc(r.phone || party.phone || '-')}</div><div>GSTIN: ${esc(party.gstin || '-')}</div><div>${esc(party.address || '')}</div></div>
-          <div><span>Summary</span><strong>${fmt(totals.total)}</strong><div>Subtotal: ${fmt(totals.sub)}</div><div>GST: ${fmt(totals.gst)}</div></div>
-        </div>
-        <div class="table-wrap"><table><thead><tr><th>#</th><th>Item</th><th>Qty</th><th>Unit</th><th>Price</th><th>GST</th><th>Total</th></tr></thead><tbody>${rows}</tbody></table></div>
-        <div class="total-section"><div class="total-row"><span>Subtotal</span><span>${fmt(totals.sub)}</span></div><div class="total-row"><span>GST</span><span>${fmt(totals.gst)}</span></div><div class="total-row grand"><span>Total</span><span>${fmt(totals.total)}</span></div></div>
-        ${r.notes ? `<div class="invoice-note"><strong>Notes:</strong> ${esc(r.notes)}</div>` : ''}`;
-    }
-
-    function openInvoiceView(type, index) {
-      activeInvoice = { type, index };
-      document.getElementById('invoice-preview').innerHTML = invoiceHTML(type, index);
-      document.getElementById('invoice-view-modal').classList.add('open');
-    }
-    function closeInvoiceView() { document.getElementById('invoice-view-modal').classList.remove('open'); }
-    function printInvoice() { if (!activeInvoice) return; window.print(); }
-
-    function openModal(type, idx = -1) {
-      currentType = type; editIndex = idx;
-      const isSale = type === 'sale';
-      document.getElementById('modal-title').textContent = idx >= 0 ? (isSale ? 'Edit Invoice' : 'Edit Purchase Bill') : (isSale ? 'Create Invoice' : 'Create Purchase Bill');
-      document.getElementById('party-label').textContent = isSale ? 'Customer Name' : 'Vendor Name';
-      const parties = isSale ? store.customers : store.vendors;
-      document.getElementById('party-list').innerHTML = parties.map(p => `<option value="${p.name}">`).join('');
-      updateProductList();
-      const today = new Date().toISOString().split('T')[0];
-      if (idx >= 0) {
-        const r = isSale ? store.sales[idx] : store.purchases[idx];
-        const parts = splitBillNo(r.invoiceNo, isSale ? 'INV-' : 'PUR-');
-        document.getElementById('f-party').value = r.party;
-        document.getElementById('f-bill-prefix').value = parts.prefix;
-        document.getElementById('f-billno').value = parts.number;
-        document.getElementById('f-date').value = r.date;
-        document.getElementById('f-due').value = r.due;
-        document.getElementById('f-phone').value = r.phone;
-        document.getElementById('f-status').value = r.status;
-        document.getElementById('f-notes').value = r.notes;
-        document.getElementById('items-body').innerHTML = '';
-        r.items.forEach(it => addItemRow(it));
-      } else {
-        document.getElementById('f-party').value = '';
-        document.getElementById('f-bill-prefix').value = isSale ? 'INV-' : 'PUR-';
-        document.getElementById('f-billno').value = String(isSale ? invoiceCounters.sale : invoiceCounters.purchase);
-        document.getElementById('f-date').value = today;
-        document.getElementById('f-due').value = '';
-        document.getElementById('f-phone').value = '';
-        document.getElementById('f-status').value = 'pending';
-        document.getElementById('f-notes').value = '';
-        document.getElementById('items-body').innerHTML = '';
-      }
-      updateTotals();
-      document.getElementById('invoice-modal').classList.add('open');
-    }
-
-    function closeModal() { document.getElementById('invoice-modal').classList.remove('open'); }
-
-    function splitBillNo(value, fallbackPrefix) {
-      const match = String(value || '').match(/^([A-Za-z]+-?0*)(.*)$/);
-      if (!match) return { prefix: fallbackPrefix, number: value || '' };
-      return { prefix: match[1].replace(/0+$/, '') || fallbackPrefix, number: match[2] || '' };
-    }
-
-    function fullBillNo() {
-      const prefix = document.getElementById('f-bill-prefix').value.trim() || (currentType === 'sale' ? 'INV-' : 'PUR-');
-      const number = document.getElementById('f-billno').value.trim();
-      return prefix + number.padStart(3, '0');
-    }
-
-    function addItemRow(item = {}) {
-      const tr = document.createElement('tr');
-      const product = findProduct(item.name || '');
-      const stock = product ? product.stock : null;
-      const stockColor = stock === null ? '' : stock <= 0 ? 'var(--red)' : stock <= 5 ? 'var(--amber)' : 'var(--green)';
-      const stockText = stock === null ? '' : `Stock: ${stock}`;
-      tr.innerHTML = `
-        <td>
-          <input type="text" list="product-list" placeholder="Item name" value="${esc(item.name || '')}" oninput="handleProductInput(this)">
-          <small class="item-stock-label" style="display:block;font-size:11px;color:${stockColor};margin-top:2px">${stockText}</small>
-        </td>
-        <td><input type="number" min="1" value="${item.qty || 1}" oninput="updateTotals();checkStockWarning(this)"></td>
-        <td><input type="text" value="${esc(item.unit || 'pcs')}" oninput="updateTotals()"></td>
-        <td><input type="number" min="0" value="${item.price || ''}" placeholder="0" oninput="updateTotals()"></td>
-        <td><input type="number" min="0" max="100" value="${item.gst || 18}" oninput="updateTotals()"></td>
-        <td><button class="btn sm icon danger" title="Remove" onclick="this.closest('tr').remove();updateTotals()"><i class="ti ti-trash"></i></button></td>`;
-      document.getElementById('items-body').appendChild(tr);
-    }
-
-    function handleProductInput(input) {
-      const product = findProduct(input.value);
-      const row = input.closest('tr');
-      const rowInputs = row.querySelectorAll('input');
-      const stockLabel = row.querySelector('.item-stock-label');
-      if (product) {
-        rowInputs[2].value = product.unit || 'pcs';
-        rowInputs[3].value = currentType === 'purchase' ? (product.purchasePrice || 0) : (product.salePrice || 0);
-        rowInputs[4].value = product.gst || 0;
-        if (stockLabel) {
-          stockLabel.textContent = `Stock: ${product.stock}`;
-          stockLabel.style.color = product.stock <= 0 ? 'var(--red)' : product.stock <= 5 ? 'var(--amber)' : 'var(--green)';
-        }
-      } else {
-        if (stockLabel) { stockLabel.textContent = ''; }
-      }
-      updateTotals();
-    }
-
-    function checkStockWarning(qtyInput) {
-      const row = qtyInput.closest('tr');
-      const nameInput = row.querySelectorAll('input')[0];
-      const stockLabel = row.querySelector('.item-stock-label');
-      const product = findProduct(nameInput.value);
-      if (!product || !stockLabel) return;
-      const qty = parseFloat(qtyInput.value) || 0;
-      if (qty > product.stock) {
-        stockLabel.textContent = `⚠️ Stock sirf ${product.stock} hai!`;
-        stockLabel.style.color = 'var(--red)';
-      } else {
-        stockLabel.textContent = `Stock: ${product.stock}`;
-        stockLabel.style.color = product.stock <= 5 ? 'var(--amber)' : 'var(--green)';
-      }
-    }
-
-    function addQuickProduct() {
-      const nameInput = document.getElementById('quick-product');
-      const qtyInput = document.getElementById('quick-qty');
-      const name = nameInput.value.trim();
-      if (!name) { alert('Product select karein'); return; }
-      const product = findProduct(name);
-      addItemRow({
-        name,
-        qty: parseFloat(qtyInput.value) || 1,
-        unit: product?.unit || 'pcs',
-        price: currentType === 'purchase' ? (product?.purchasePrice || 0) : (product?.salePrice || 0),
-        gst: product?.gst ?? 18
-      });
-      nameInput.value = ''; qtyInput.value = 1;
-      updateTotals();
-    }
-
-    function getItemRows() {
-      const rows = [];
-      document.querySelectorAll('#items-body tr').forEach(tr => {
-        const ins = tr.querySelectorAll('input');
-        rows.push({ name: ins[0].value, qty: parseFloat(ins[1].value) || 0, unit: ins[2].value, price: parseFloat(ins[3].value) || 0, gst: parseFloat(ins[4].value) || 0 });
-      });
-      return rows;
-    }
-
-    function updateTotals() {
-      const t = calcTotals(getItemRows());
-      document.getElementById('t-sub').textContent = fmt(t.sub);
-      document.getElementById('t-gst').textContent = fmt(t.gst);
-      document.getElementById('t-total').textContent = fmt(t.total);
-    }
-
-    function saveEntry() {
-      const party = document.getElementById('f-party').value.trim();
-      if (!party) { alert('Party ka naam daalein'); return; }
-      const partyRecord = (currentType === 'sale' ? store.customers : store.vendors).find(p => p.name === party);
-      const items = getItemRows();
-      if (!items.length) { alert('Pehle product add karein'); return; }
-      const entry = {
-        invoiceNo: fullBillNo(), party,
-        phone: document.getElementById('f-phone').value || partyRecord?.phone || '',
-        date: document.getElementById('f-date').value,
-        due: document.getElementById('f-due').value,
-        items,
-        status: document.getElementById('f-status').value,
-        notes: document.getElementById('f-notes').value
-      };
-      const isSale = currentType === 'sale';
-
-      if (editIndex >= 0) {
-        // Edit: stock wapas karo, naya ghataao
-        if (isSale) {
-          const oldEntry = store.sales[editIndex];
-          oldEntry.items.forEach(item => { const p = findProduct(item.name); if (p) p.stock += (parseFloat(item.qty) || 0); });
-          entry.items.forEach(item => { const p = findProduct(item.name); if (p) p.stock -= (parseFloat(item.qty) || 0); });
-        }
-        if (isSale) store.sales[editIndex] = entry; else store.purchases[editIndex] = entry;
-      } else {
-        if (isSale) { store.sales.push(entry); invoiceCounters.sale++; }
-        else { store.purchases.push(entry); invoiceCounters.purchase++; }
-        if (isSale && !store.customers.find(c => c.name === party)) store.customers.push({ name: party, phone: entry.phone, gstin: '', address: '' });
-        if (!isSale && !store.vendors.find(v => v.name === party)) store.vendors.push({ name: party, phone: entry.phone, gstin: '', address: '' });
-        entry.items.forEach(item => {
-          if (item.name) {
-            const existing = findProduct(item.name);
-            if (existing) {
-              if (isSale) existing.stock -= (parseFloat(item.qty) || 0);
-            } else {
-              store.products.push({ name: item.name, unit: item.unit || 'pcs', salePrice: item.price || 0, purchasePrice: item.price || 0, gst: item.gst || 0, stock: isSale ? -(parseFloat(item.qty) || 0) : 0 });
-            }
-          }
-        });
-      }
-
-      saveData();
-      closeModal();
-      renderTable(isSale ? 'sales' : 'purchase');
-      renderProducts();
-      updateProductList();
-      if (activeLedgerCustomer) renderCustomerLedger();
-    }
-
-    async function editEntry(idx, type) {
-      const label = `${type === 'sales' ? 'Sale Invoice' : 'Purchase Bill'} edit`;
-      if (!await verifyActionPassword(label)) return;
-      openModal(type === 'sales' ? 'sale' : 'purchase', idx);
-    }
-
-    async function deleteEntry(idx, type) {
-      const label = `${type === 'sales' ? 'Sale Invoice' : 'Purchase Bill'} delete`;
-      if (!await verifyActionPassword(label)) return;
-      if (type === 'sales') {
-        const entry = store.sales[idx];
-        entry.items.forEach(item => { const p = findProduct(item.name); if (p) p.stock += (parseFloat(item.qty) || 0); });
-        store.sales.splice(idx, 1);
-      } else {
-        store.purchases.splice(idx, 1);
-      }
-      saveData();
-      renderTable(type);
-      renderProducts();
-      updateProductList();
-      if (activeLedgerCustomer && type === 'sales') renderCustomerLedger();
-    }
-
-    function openPartyModal(type) {
-      currentPartyType = type; editPartyIndex = -1;
-      document.getElementById('party-modal-title').textContent = `Add ${type === 'customer' ? 'Customer' : 'Vendor'}`;
-      ['p-name', 'p-phone', 'p-gstin', 'p-address'].forEach(id => document.getElementById(id).value = '');
-      document.getElementById('party-modal').classList.add('open');
-    }
-    function closePartyModal() { document.getElementById('party-modal').classList.remove('open'); }
-    function saveParty() {
-      const name = document.getElementById('p-name').value.trim();
-      if (!name) { alert('Naam daalein'); return; }
-      const p = { name, phone: document.getElementById('p-phone').value, gstin: document.getElementById('p-gstin').value, address: document.getElementById('p-address').value };
-      if (currentPartyType === 'customer') { store.customers.push(p); renderParties('customers'); }
-      else { store.vendors.push(p); renderParties('vendors'); }
-      saveData(); closePartyModal();
-    }
-
-    async function deleteParty(idx, type) {
-      const isCustomer = type === 'customers';
-      const party = isCustomer ? store.customers[idx] : store.vendors[idx];
-      if (!party) return;
-      if (!await verifyActionPassword(isCustomer ? 'Customer delete' : 'Vendor delete')) return;
-      if (isCustomer) { store.customers.splice(idx, 1); store.sales = store.sales.filter(r => r.party !== party.name); renderParties('customers'); renderTable('sales'); }
-      else { store.vendors.splice(idx, 1); store.purchases = store.purchases.filter(r => r.party !== party.name); renderParties('vendors'); renderTable('purchase'); }
-      saveData(); renderDashboard();
-    }
-
-    async function openProductModal(idx = -1) {
-      if (idx >= 0) {
-        if (!await verifyActionPassword('Product edit')) return;
-      }
-      editProductIndex = idx;
-      document.getElementById('product-modal-title').textContent = idx >= 0 ? 'Edit Product' : 'Add Product';
-      const p = idx >= 0 ? store.products[idx] : { name: '', unit: 'pcs', salePrice: '', purchasePrice: '', gst: 18, stock: 0 };
-      document.getElementById('pr-name').value = p.name || '';
-      document.getElementById('pr-unit').value = p.unit || 'pcs';
-      document.getElementById('pr-sale').value = p.salePrice ?? '';
-      document.getElementById('pr-purchase').value = p.purchasePrice ?? '';
-      document.getElementById('pr-gst').value = p.gst ?? 18;
-      document.getElementById('pr-stock').value = p.stock ?? 0;
-      document.getElementById('product-modal').classList.add('open');
-    }
-    function closeProductModal() { document.getElementById('product-modal').classList.remove('open'); }
-    function saveProduct() {
-      const name = document.getElementById('pr-name').value.trim();
-      if (!name) { alert('Product ka naam daalein'); return; }
-      const product = {
-        name, unit: document.getElementById('pr-unit').value || 'pcs',
-        salePrice: parseFloat(document.getElementById('pr-sale').value) || 0,
-        purchasePrice: parseFloat(document.getElementById('pr-purchase').value) || 0,
-        gst: parseFloat(document.getElementById('pr-gst').value) || 0,
-        stock: parseFloat(document.getElementById('pr-stock').value) || 0
-      };
-      if (editProductIndex >= 0) store.products[editProductIndex] = product;
-      else store.products.push(product);
-      saveData(); closeProductModal(); renderProducts(); updateProductList();
-    }
-
-    async function deleteProduct(idx) {
-      if (!await verifyActionPassword('Product delete')) return;
-      store.products.splice(idx, 1);
-      saveData(); renderProducts(); updateProductList();
-    }
-
-    function filterTable(tableId, q) {
-      document.querySelectorAll(`#${tableId} tbody tr`).forEach(r => {
-        r.style.display = r.textContent.toLowerCase().includes(q.toLowerCase()) ? '' : 'none';
-      });
-    }
-
-    document.addEventListener('keydown', e => {
-      if (e.key === 'Escape') { closeModal(); closePartyModal(); closeProductModal(); closeCustomerLedger(); closeInvoiceView(); }
-    });
-
-    document.body.classList.add('auth-locked');
-    setAuthMode('login');
-
-    function updateHeaderClock() {
-      const now = new Date();
-      document.getElementById('liveTime').textContent = now.toLocaleTimeString();
-      document.getElementById('liveDate').textContent = now.toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' });
-    }
-    setInterval(updateHeaderClock, 1000);
-    updateHeaderClock();
-
-    // ============ EMPLOYEE ACCESS SYSTEM ============
-
-    // Toast Notification System
-    function showToast(type, title, message) {
-      const container = document.getElementById('toast-container');
-      const icons = { warning: 'ti-alert-triangle', success: 'ti-circle-check', error: 'ti-x' };
-      const toast = document.createElement('div');
-      toast.className = `toast ${type}`;
-      toast.innerHTML = `<i class="ti ${icons[type] || 'ti-info-circle'}"></i><div><strong>${title}</strong><div style="font-weight:500;opacity:.85;margin-top:2px">${message}</div></div>`;
-      container.appendChild(toast);
-      setTimeout(() => {
-        toast.classList.add('toast-out');
-        setTimeout(() => toast.remove(), 350);
-      }, 3200);
-    }
-
-    // Premium Modal
-    function openPremiumModal() {
-      document.getElementById('premium-modal').classList.add('open');
-    }
-    function closePremiumModal() {
-      document.getElementById('premium-modal').classList.remove('open');
-    }
-
-    // Payment Modal Functions
-    function openPaymentModal() {
-      document.getElementById('pay-transaction-id').value = '';
-      const statusMsg = document.getElementById('payment-status-message');
-      statusMsg.style.display = 'none';
-      statusMsg.textContent = '';
-      document.getElementById('payment-modal').classList.add('open');
-    }
-
-    function closePaymentModal() {
-      document.getElementById('payment-modal').classList.remove('open');
-    }
-
-    function submitPayment() {
-      const transId = document.getElementById('pay-transaction-id').value.trim();
-      if (!transId) {
-        alert('Card Number / UPI Transaction ID daalein!');
-        return;
-      }
-      const statusMsg = document.getElementById('payment-status-message');
-      const payConfirmBtn = document.getElementById('pay-confirm-btn');
-
-      payConfirmBtn.disabled = true;
-      payConfirmBtn.textContent = 'Processing...';
-      statusMsg.style.color = 'var(--blue)';
-      statusMsg.style.display = 'block';
-      statusMsg.textContent = '⏳ Processing payment, please wait...';
-
-      setTimeout(() => {
-        statusMsg.style.color = 'var(--green)';
-        statusMsg.textContent = '✅ Payment Successful! ₹50 Received.';
-
-        setTimeout(() => {
-          setEmployeePaid(true);
-          closePaymentModal();
-          payConfirmBtn.disabled = false;
-          payConfirmBtn.textContent = 'Pay ₹50';
-
-          const empNavBtn = document.querySelector('.nav-item[data-page="employees"]');
-          if (empNavBtn) {
-            showPage('employees', empNavBtn);
-          }
-        }, 1200);
-      }, 1500);
-    }
-
-    // Activate Employee Access (after payment)
-    function activateEmployeeAccess() {
-      closePremiumModal();
-      openPaymentModal();
-    }
-
-    // Employee Credentials Setup
-    function openEmpSetupModal() {
-      document.getElementById('emp-setup-username').value = '';
-      document.getElementById('emp-setup-pass').value = '';
-      document.getElementById('emp-setup-confirm').value = '';
-      document.getElementById('emp-setup-modal').classList.add('open');
-    }
-    function closeEmpSetupModal() {
-      document.getElementById('emp-setup-modal').classList.remove('open');
-    }
-    function saveEmployeePassword() {
-      const username = document.getElementById('emp-setup-username').value.trim();
-      const pass = document.getElementById('emp-setup-pass').value;
-      const confirm = document.getElementById('emp-setup-confirm').value;
-      if (!username) { alert('Employee User ID (Username) daalein'); return; }
-      if (!pass || pass.length < 4) { alert('Password kam se kam 4 characters ka hona chahiye'); return; }
-      if (pass !== confirm) { alert('Passwords match nahi kar rahe'); return; }
-
-      if (!store.employees) store.employees = [];
-      const exists = store.employees.some(e => e.username.toLowerCase() === username.toLowerCase());
-      if (exists) {
-        alert('Ye User ID pehle se kisi employee ki hai!');
-        return;
-      }
-
-      store.employees.push({
-        username: username,
-        password: pass,
-        blocked: false
-      });
-
-      saveData();
-      closeEmpSetupModal();
-      showToast('success', '✅ Credentials Saved', 'Employee credentials set ho gaye.');
-      if (document.getElementById('page-employees') && document.getElementById('page-employees').classList.contains('active')) {
-        renderEmployees();
-      }
-    }
-
-    // Employee Credentials Storage Fallback / Paid Check
-    function isEmployeePaid() {
-      return !!(store._employeePaid || localStorage.getItem(`billpro_emp_paid_${currentUser}`) === 'true');
-    }
-    function setEmployeePaid(status) {
-      store._employeePaid = status;
-      localStorage.setItem(`billpro_emp_paid_${currentUser}`, status ? 'true' : 'false');
-      saveData();
-    }
-
-    // Employee Login Modal (from inside app)
-    function openEmpLoginModal() {
-      document.getElementById('emp-login-username').value = '';
-      document.getElementById('emp-login-pass').value = '';
-      document.getElementById('emp-login-modal').classList.add('open');
-    }
-    function closeEmpLoginModal() {
-      document.getElementById('emp-login-modal').classList.remove('open');
-    }
-    function employeeLogin() {
-      const enteredUser = document.getElementById('emp-login-username').value.trim();
-      const enteredPass = document.getElementById('emp-login-pass').value;
-      if (!enteredUser || !enteredPass) { alert('User ID aur Password dono daalein'); return; }
-
-      if (!store.employees || store.employees.length === 0) {
-        alert('Pehle credentials setup karein');
-        closeEmpLoginModal();
-        openEmpSetupModal();
-        return;
-      }
-
-      const emp = store.employees.find(e => e.username.toLowerCase() === enteredUser.toLowerCase());
-      if (!emp || emp.password !== enteredPass) {
-        alert('Galat User ID ya Password!');
-        return;
-      }
-
-      if (emp.blocked) {
-        alert('Aapka account Inactive hai. Kripya Admin se sampark karein.');
-        return;
-      }
-
-      // Setup session details
-      localStorage.setItem('emp_session_admin_uid', currentUser);
-      localStorage.setItem('emp_session_admin_email', window._fbCurrentEmail);
-      localStorage.setItem('emp_session_username', emp.username);
-
-      closeEmpLoginModal();
-      enterEmployeeMode();
-    }
-
-    // Employee Access Main Button
-    function handleEmployeeAccessBtn() {
-      if (!isEmployeePaid()) {
-        openPremiumModal();
-      } else {
-        if (!store.employees || store.employees.length === 0) {
-          openEmpSetupModal();
-        } else {
-          openEmpLoginModal();
-        }
-      }
-    }
-
-    // Reset Credentials Prompt (Requires Admin Password verification)
-    async function resetEmployeeCredentialsPrompt() {
-      if (!await verifyActionPassword('Employee Credentials change')) return;
-      closeEmpLoginModal();
-      openEmpSetupModal();
-    }
-
-    function updateEmployeesNavUI() {
-      const badge = document.getElementById('emp-premium-badge');
-      if (!badge) return;
-      if (isEmployeePaid()) {
-        badge.style.display = 'none';
-      } else {
-        badge.style.display = 'inline-flex';
-      }
-    }
-
-    function handleEmployeesNavClick(el) {
-      if (isEmployeeMode) {
-        return; // Restricted in employee mode
-      }
-      if (!isEmployeePaid()) {
-        openPremiumModal();
-      } else {
-        showPage('employees', el);
-      }
-    }
-
-    // Enter Employee Mode
-    function enterEmployeeMode() {
-      isEmployeeMode = true;
-      document.body.classList.add('employee-mode');
-      document.getElementById('emp-mode-indicator').style.display = 'inline-flex';
-      const exitBtn = document.getElementById('exit-emp-btn-header');
-      if (exitBtn) exitBtn.style.display = 'inline-flex';
-      const sidebarEmpSection = document.getElementById('sidebar-emp-section');
-      if (sidebarEmpSection) sidebarEmpSection.style.display = 'block';
-
-      const salesBtn = document.querySelector('.nav-item[data-page="sales"]');
-      if (salesBtn) showPage('sales', salesBtn);
-
-      showToast('success', '👤 Employee Mode Active', 'Aap ab Sale aur Purchase use kar saktein hain');
-    }
-
-    // Exit Employee Mode (Requires Admin password)
-    async function exitEmployeeMode() {
-      const adminEmail = localStorage.getItem('emp_session_admin_email') || window._fbCurrentEmail;
-      if (!adminEmail) return;
-      const entered = prompt('Admin Mode mein wapas jaane ke liye admin password daalein:');
-      if (!entered) return;
-      try {
-        await window._fbFns.signInWithEmailAndPassword(window._fbAuth, adminEmail, entered);
-
-        localStorage.removeItem('emp_session_admin_uid');
-        localStorage.removeItem('emp_session_admin_email');
-        localStorage.removeItem('emp_session_username');
-
-        isEmployeeMode = false;
-        document.body.classList.remove('employee-mode');
-        document.getElementById('emp-mode-indicator').style.display = 'none';
-        const exitBtn = document.getElementById('exit-emp-btn-header');
-        if (exitBtn) exitBtn.style.display = 'none';
-        const sidebarEmpSection = document.getElementById('sidebar-emp-section');
-        if (sidebarEmpSection) sidebarEmpSection.style.display = 'none';
-
-        currentUser = window._fbAuth.currentUser.uid;
-        await window._fbLoadStore();
-        updateEmployeesNavUI();
-
-        const dashBtn = document.querySelector('.nav-item[data-page="dashboard"]');
-        if (dashBtn) showPage('dashboard', dashBtn);
-        showToast('success', '🔓 Admin Mode', 'Admin mode mein wapas aa gaye');
-      } catch (e) {
-        alert('Galat Admin password!');
-      }
-    }
-
-    // Logout Employee Session
-    function logoutEmployee() {
-      localStorage.removeItem('emp_session_admin_uid');
-      localStorage.removeItem('emp_session_admin_email');
-      localStorage.removeItem('emp_session_username');
-      isEmployeeMode = false;
-      currentUser = null;
-      window._fbCurrentEmail = null;
-      store = structuredClone(defaultStore);
-      document.body.classList.add('auth-locked');
-      document.body.classList.remove('employee-mode');
-      document.getElementById('emp-mode-indicator').style.display = 'none';
-      const exitBtn = document.getElementById('exit-emp-btn-header');
-      if (exitBtn) exitBtn.style.display = 'none';
-      const sidebarEmpSection = document.getElementById('sidebar-emp-section');
-      if (sidebarEmpSection) sidebarEmpSection.style.display = 'none';
-      switchAuthTab('admin');
-    }
-
-    // Tab Switching for Login Screen (Admin vs Employee)
-    let currentAuthTab = 'admin';
-    function switchAuthTab(tab) {
-      currentAuthTab = tab;
-      const adminTab = document.getElementById('tab-admin-login');
-      const empTab = document.getElementById('tab-emp-login');
-      const emailRowLabel = document.querySelector('#auth-email-row label');
-      const emailInput = document.getElementById('auth-email');
-      const forgotBtn = document.getElementById('forgot-btn');
-      const switchBtn = document.getElementById('auth-switch-btn');
-
-      setAuthMode('login');
-
-      if (tab === 'employee') {
-        adminTab.style.borderBottom = 'none';
-        adminTab.style.color = 'var(--muted)';
-        empTab.style.borderBottom = '2px solid var(--blue)';
-        empTab.style.color = 'var(--blue)';
-
-        emailRowLabel.textContent = "Admin's Email";
-        emailInput.placeholder = "Enter Admin's Email";
-
-        document.getElementById('auth-emp-user-row').style.display = 'block';
-        forgotBtn.style.display = 'none';
-        switchBtn.style.display = 'none';
-
-        document.getElementById('auth-main-btn').setAttribute('onclick', 'employeeAuthLogin()');
-      } else {
-        adminTab.style.borderBottom = '2px solid var(--blue)';
-        adminTab.style.color = 'var(--blue)';
-        empTab.style.borderBottom = 'none';
-        empTab.style.color = 'var(--muted)';
-
-        emailRowLabel.textContent = "Email";
-        emailInput.placeholder = "name@example.com";
-
-        document.getElementById('auth-emp-user-row').style.display = 'none';
-        forgotBtn.style.display = 'inline-flex';
-        switchBtn.style.display = 'inline-flex';
-
-        document.getElementById('auth-main-btn').setAttribute('onclick', 'login()');
-      }
-    }
-
-    // Employee Auth Login (directly from login page)
-    async function employeeAuthLogin() {
-      const adminEmail = document.getElementById('auth-email').value.trim().toLowerCase();
-      const empUser = document.getElementById('auth-emp-username').value.trim();
-      const empPass = document.getElementById('auth-pass').value;
-
-      if (!adminEmail || !empUser || !empPass) {
-        alert('Admin Email, Employee User ID aur Password sabhi details daalein');
-        return;
-      }
-
-      try {
-        const { collection, query, where, getDocs } = window._fbFns;
-        const usersRef = collection(window._fbDb, 'users');
-        const q = query(usersRef, where('adminEmail', '==', adminEmail));
-        const querySnapshot = await getDocs(q);
-
-        if (querySnapshot.empty) {
-          alert('Ye Admin Email registered nahi hai!');
-          return;
-        }
-
-        let foundAdminUid = null;
-        let adminData = null;
-        querySnapshot.forEach((doc) => {
-          foundAdminUid = doc.id;
-          adminData = doc.data();
-        });
-
-        if (!adminData || !adminData.employees || !Array.isArray(adminData.employees)) {
-          alert('Is Admin account ke liye koi employee setup nahi hai!');
-          return;
-        }
-
-        const employee = adminData.employees.find(e => e.username.toLowerCase() === empUser.toLowerCase());
-        if (!employee || employee.password !== empPass) {
-          alert('Galat Employee User ID ya Password!');
-          return;
-        }
-
-        if (employee.blocked) {
-          alert('Aapka account Inactive hai. Kripya Admin se sampark karein.');
-          return;
-        }
-
-        // Save employee session to localstorage
-        localStorage.setItem('emp_session_admin_uid', foundAdminUid);
-        localStorage.setItem('emp_session_admin_email', adminEmail);
-        localStorage.setItem('emp_session_username', employee.username);
-
-        await loadEmployeeSession();
-        showToast('success', '🔑 Login Successful', `Logged in as ${employee.username}`);
-      } catch (e) {
-        console.error("Employee auth error:", e);
-        alert("Login error: " + e.message);
-      }
-    }
-
-    // Load Employee Session from LocalStorage (persists on reload)
-    async function loadEmployeeSession() {
-      const adminUid = localStorage.getItem('emp_session_admin_uid');
-      const adminEmail = localStorage.getItem('emp_session_admin_email');
-      const empUsername = localStorage.getItem('emp_session_username');
-
-      if (!adminUid || !adminEmail || !empUsername) return;
-
-      currentUser = adminUid;
-      window._fbCurrentEmail = adminEmail;
-      isEmployeeMode = true;
-
-      try {
-        const { doc, getDoc } = window._fbFns;
-        const ref = doc(window._fbDb, 'users', adminUid);
-        const snap = await getDoc(ref);
-        if (snap.exists()) {
-          store = removeDemoData(snap.data());
-          // Verify that this employee wasn't blocked since last load
-          if (store.employees) {
-            const currentEmp = store.employees.find(e => e.username.toLowerCase() === empUsername.toLowerCase());
-            if (currentEmp && currentEmp.blocked) {
-              alert('Aapka account inactive hai.');
-              logoutEmployee();
-              return;
-            }
-          }
-        } else {
-          alert("Error: Admin database empty!");
-          logoutEmployee();
-          return;
-        }
-      } catch (e) {
-        console.error("Firestore load error for employee:", e);
-        logoutEmployee();
-        return;
-      }
-
-      invoiceCounters = loadInvoiceCounters();
-      document.body.classList.remove('auth-locked');
-      document.body.classList.add('employee-mode');
-      document.getElementById('emp-mode-indicator').style.display = 'inline-flex';
-      const exitBtn = document.getElementById('exit-emp-btn-header');
-      if (exitBtn) exitBtn.style.display = 'inline-flex';
-      const sidebarEmpSection = document.getElementById('sidebar-emp-section');
-      if (sidebarEmpSection) sidebarEmpSection.style.display = 'block';
-      document.getElementById('current-user-label').textContent = `${empUsername} (${adminEmail})`;
-
-      const salesBtn = document.querySelector('.nav-item[data-page="sales"]');
-      if (salesBtn) showPage('sales', salesBtn);
-
-      updateProductList();
-    }
-
-    // Employee List Render and Management for Admin
-    function renderEmployees() {
-      const tbody = document.getElementById('employees-tbody');
-      if (!store.employees) store.employees = [];
-      if (!store.employees.length) {
-        tbody.innerHTML = '<tr><td colspan="5" class="empty">Koi employee nahi hai. Naya Employee add karein.</td></tr>';
-        return;
-      }
-      tbody.innerHTML = store.employees.map((emp, i) => {
-        const statusBadge = emp.blocked
-          ? `<span class="badge cancelled">Inactive</span>`
-          : `<span class="badge paid">Active</span>`;
-        const toggleBtn = emp.blocked
-          ? `<button class="btn sm primary" style="background:var(--green); border-color:var(--green);" onclick="toggleBlockEmployee(${i}, false)"><i class="ti ti-lock-open"></i> Activate</button>`
-          : `<button class="btn sm danger" onclick="toggleBlockEmployee(${i}, true)"><i class="ti ti-lock"></i> Deactivate</button>`;
-
-        return `<tr>
-          <td>${i + 1}</td>
-          <td class="cell-strong">${esc(emp.username)}</td>
-          <td>${esc(emp.password)}</td>
-          <td>${statusBadge}</td>
-          <td>
-            ${toggleBtn}
-            <button class="btn sm icon danger" title="Delete" onclick="deleteEmployee(${i})"><i class="ti ti-trash"></i></button>
-          </td>
-        </tr>`;
-      }).join('');
-    }
-
-    function toggleBlockEmployee(index, blockStatus) {
-      if (!store.employees) return;
-      store.employees[index].blocked = blockStatus;
-      saveData();
-      renderEmployees();
-      showToast('success', blockStatus ? '🔒 Employee Inactive' : '🔓 Employee Active', `Employee ${store.employees[index].username} ko ${blockStatus ? 'inactive' : 'active'} kar diya gaya hai.`);
-    }
-
-    async function deleteEmployee(index) {
-      if (!await verifyActionPassword('Employee delete')) return;
-      const name = store.employees[index].username;
-      store.employees.splice(index, 1);
-      saveData();
-      renderEmployees();
-      showToast('success', '🗑️ Employee Deleted', `Employee ${name} ko delete kar diya gaya hai.`);
+    function esc(s) {
+      return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
     }
   </script>
 </body>
-
 </html>
