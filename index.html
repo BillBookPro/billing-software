@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>Barcode Scanner</title>
+  <script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.20.0/umd/index.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #0f1923; color: #fff;
+      min-height: 100vh; display: flex; flex-direction: column;
+    }
+    .header {
+      background: linear-gradient(135deg, #1663a6, #0c477c);
+      padding: 14px 18px; display: flex; align-items: center;
+      gap: 10px; box-shadow: 0 2px 12px rgba(0,0,0,0.3);
+    }
+    .header-icon { font-size: 24px; }
+    .header h1 { font-size: 17px; font-weight: 800; }
+    .header p  { font-size: 11px; opacity: 0.75; margin-top: 2px; }
+
+    .camera-wrap {
+      position: relative; width: 100%;
+      background: #000; flex-shrink: 0;
+    }
+    #video {
+      width: 100%; display: block;
+      height: 62vw; object-fit: cover;
+    }
+    .scan-overlay {
+      position: absolute; inset: 0; pointer-events: none;
+    }
+    .corner {
+      position: absolute; width: 28px; height: 28px;
+      border-color: #00ff88; border-style: solid; border-width: 0;
+    }
+    .corner.tl { top: 12px; left: 12px; border-top-width: 3px; border-left-width: 3px; border-radius: 4px 0 0 0; }
+    .corner.tr { top: 12px; right: 12px; border-top-width: 3px; border-right-width: 3px; border-radius: 0 4px 0 0; }
+    .corner.bl { bottom: 12px; left: 12px; border-bottom-width: 3px; border-left-width: 3px; border-radius: 0 0 0 4px; }
+    .corner.br { bottom: 12px; right: 12px; border-bottom-width: 3px; border-right-width: 3px; border-radius: 0 0 4px 0; }
+    .corner.found { border-color: #ffcc00; }
+
+    .laser {
+      position: absolute; left: 8px; right: 8px; height: 2px;
+      background: linear-gradient(90deg, transparent, #00ff88, transparent);
+      box-shadow: 0 0 8px #00ff88;
+      animation: laser-scan 1.8s ease-in-out infinite; top: 20%;
+    }
+    .laser.found {
+      background: linear-gradient(90deg, transparent, #ffcc00, transparent);
+      box-shadow: 0 0 8px #ffcc00; animation: none;
+    }
+    @keyframes laser-scan {
+      0%   { top: 15%; opacity: 0.9; }
+      50%  { top: 80%; opacity: 1; }
+      100% { top: 15%; opacity: 0.9; }
+    }
+
+    /* Zoom indicator */
+    .zoom-badge {
+      position: absolute; bottom: 30px; left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0,0,0,0.6); color: #fff;
+      font-size: 12px; font-weight: 700;
+      padding: 4px 12px; border-radius: 20px;
+      display: none;
+    }
+    .zoom-badge.show { display: block; }
+
+    /* Torch button */
+    .torch-btn {
+      position: absolute; top: 8px; left: 10px;
+      background: rgba(0,0,0,0.55); border: none;
+      color: #fff; font-size: 18px;
+      padding: 4px 10px; border-radius: 20px;
+      cursor: pointer; z-index: 5;
+      display: none;
+    }
+    .torch-btn.show { display: block; }
+    .torch-btn.on { background: rgba(255,200,0,0.8); }
+
+    .scan-hint {
+      position: absolute; bottom: 8px; left: 0; right: 0;
+      text-align: center; font-size: 12px;
+      color: rgba(255,255,255,0.85); text-shadow: 0 1px 3px #000;
+    }
+    .engine-badge {
+      position: absolute; top: 8px; right: 10px;
+      font-size: 10px; background: rgba(0,0,0,0.55);
+      color: #00ff88; padding: 3px 8px;
+      border-radius: 20px; font-weight: 700;
+    }
+
+    .confirm-overlay {
+      display: none; position: absolute; inset: 0;
+      background: rgba(0,0,0,0.75);
+      flex-direction: column; align-items: center;
+      justify-content: center; gap: 14px; z-index: 10;
+    }
+    .confirm-overlay.show { display: flex; }
+    .confirm-code {
+      background: #fff; color: #0c477c;
+      font-size: 20px; font-weight: 900;
+      padding: 12px 22px; border-radius: 12px;
+      text-align: center; word-break: break-all; max-width: 90%;
+    }
+    .confirm-label { font-size: 13px; color: rgba(255,255,255,0.85); margin-top: -6px; }
+    .confirm-btns { display: flex; gap: 12px; margin-top: 4px; }
+    .btn-ok {
+      padding: 14px 32px; background: #00cc66; color: #fff;
+      border: none; border-radius: 50px; font-size: 18px;
+      font-weight: 900; cursor: pointer;
+      box-shadow: 0 4px 14px rgba(0,204,102,0.5); letter-spacing: 1px;
+    }
+    .btn-ok:active { opacity: 0.85; transform: scale(0.97); }
+    .btn-retry {
+      padding: 14px 22px; background: rgba(255,255,255,0.15);
+      color: #fff; border: 2px solid rgba(255,255,255,0.4);
+      border-radius: 50px; font-size: 15px; font-weight: 700; cursor: pointer;
+    }
+    .btn-retry:active { opacity: 0.8; }
+
+    .panel {
+      flex: 1; background: #fff; border-radius: 22px 22px 0 0;
+      padding: 18px 16px 30px; display: flex;
+      flex-direction: column; gap: 12px;
+      margin-top: -10px; position: relative; z-index: 2;
+    }
+    .btn-camera {
+      width: 100%; padding: 14px;
+      background: linear-gradient(135deg, #16a663, #0c7c47);
+      color: #fff; border: none; border-radius: 12px;
+      font-size: 16px; font-weight: 700; cursor: pointer;
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+    }
+    .btn-camera:active { opacity: 0.85; }
+    .btn-camera.off { background: linear-gradient(135deg, #e53e3e, #c53030); }
+    .status-pill {
+      display: none; text-align: center;
+      padding: 10px 14px; border-radius: 10px;
+      font-size: 14px; font-weight: 700;
+    }
+    .status-pill.success { background: #d4edda; color: #155724; }
+    .status-pill.error   { background: #f8d7da; color: #721c24; }
+    .status-pill.warn    { background: #fff3cd; color: #856404; }
+    .status-pill.sending { background: #cce5ff; color: #004085; }
+    .divider {
+      display: flex; align-items: center; gap: 8px;
+      color: #aaa; font-size: 11px; font-weight: 700;
+    }
+    .divider::before, .divider::after {
+      content: ''; flex: 1; height: 1px; background: #e0e0e0;
+    }
+    label.field-label {
+      font-size: 11px; font-weight: 700; color: #888;
+      text-transform: uppercase; letter-spacing: 1px;
+      display: block; margin-bottom: 6px;
+    }
+    input[type="text"], input[type="number"] {
+      width: 100%; border: 2px solid #1663a6; border-radius: 10px;
+      padding: 11px 14px; font-size: 16px; font-weight: 600;
+      outline: none; color: #222; background: #f7f9fb;
+    }
+    input[type="number"] { border-color: #ddd; }
+    .btn-send {
+      width: 100%; padding: 14px;
+      background: linear-gradient(135deg, #1663a6, #0c477c);
+      color: #fff; border: none; border-radius: 12px;
+      font-size: 16px; font-weight: 800; cursor: pointer;
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+    }
+    .btn-send:active { opacity: 0.85; }
+    .btn-send:disabled { opacity: 0.5; }
+    .log-header {
+      display: flex; justify-content: space-between;
+      align-items: center; margin-bottom: 6px;
+    }
+    .log-header span { font-size: 11px; font-weight: 700; color: #888; text-transform: uppercase; letter-spacing: 1px; }
+    .log-header button { font-size: 12px; color: #aaa; background: none; border: none; cursor: pointer; }
+    #log-list {
+      max-height: 180px; overflow-y: auto;
+      display: flex; flex-direction: column; gap: 5px;
+    }
+    .log-item {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 8px 12px; background: #f7f9fb; border-radius: 8px;
+      animation: fadeIn 0.2s ease;
+    }
+    @keyframes fadeIn { from { opacity:0; transform:translateY(-4px); } to { opacity:1; } }
+    .log-barcode { font-size: 14px; font-weight: 700; color: #222; }
+    .log-meta    { font-size: 11px; color: #888; }
+    .log-empty   { font-size: 13px; color: #bbb; text-align: center; padding: 14px 0; }
+    canvas { display: none; }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <div class="header-icon">📦</div>
+    <div>
+      <h1>Barcode Scanner</h1>
+      <p>Scan karo → OK dabao → Sheet mein jayega</p>
+    </div>
+  </div>
+
+  <div class="camera-wrap" id="camera-wrap" style="display:none;">
+    <video id="video" autoplay muted playsinline></video>
+    <canvas id="canvas"></canvas>
+
+    <div class="scan-overlay">
+      <div class="corner tl" id="c-tl"></div>
+      <div class="corner tr" id="c-tr"></div>
+      <div class="corner bl" id="c-bl"></div>
+      <div class="corner br" id="c-br"></div>
+      <div class="laser" id="laser"></div>
+    </div>
+
+    <!-- Torch button -->
+    <button class="torch-btn" id="torch-btn" onclick="toggleTorch()">🔦</button>
+
+    <div class="scan-hint" id="scan-hint">📷 Poore frame mein barcode rakhein</div>
+    <div class="engine-badge" id="engine-badge">⚡ Loading...</div>
+    <div class="zoom-badge" id="zoom-badge">🔍 Zoom: 1x</div>
+
+    <div class="confirm-overlay" id="confirm-overlay">
+      <div class="confirm-label">✅ Barcode mila!</div>
+      <div class="confirm-code" id="confirm-code">—</div>
+      <div class="confirm-btns">
+        <button class="btn-ok" onclick="confirmAndSend()">✔ OK</button>
+        <button class="btn-retry" onclick="retryCamera()">↩ Dobara</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <button class="btn-camera" id="camera-btn" onclick="toggleCamera()">
+      📷 Camera Kholo aur Scan Karo
+    </button>
+    <div class="status-pill" id="status-pill"></div>
+    <div class="divider">YA MANUALLY TYPE KARO</div>
+    <div>
+      <label class="field-label">Barcode</label>
+      <input type="text" id="barcode-input" placeholder="Yahan type ya scan karo..."
+        onkeydown="if(event.key==='Enter') sendManual()">
+    </div>
+    <div>
+      <label class="field-label">Quantity</label>
+      <input type="number" id="qty-input" value="1" min="1">
+    </div>
+    <button class="btn-send" id="send-btn" onclick="sendManual()">
+      📤 Google Sheet mein Send Karo
+    </button>
+    <div>
+      <div class="log-header">
+        <span>Recent Scans</span>
+        <button onclick="clearLog()">Clear</button>
+      </div>
+      <div id="log-list">
+        <p class="log-empty">Abhi koi scan nahi hua</p>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzpwcg2U04A9yw2FnU8RJEwTevslXAHcbKaGBVMk6u-lUhIm3Lv4hJ-oY5dUQwF9XWc/exec';
+
+    let stream         = null;
+    let scanning       = false;
+    let waitingOK      = false;
+    let pendingCode    = '';
+    let animFrameId    = null;
+    let torchOn        = false;
+    let videoTrack     = null;
+    const logEntries   = [];
+
+    // Auto zoom state
+    const ZOOM_LEVELS  = [1, 1.5, 2, 2.5, 1]; // cycle: 1x → 1.5x → 2x → 2.5x → back to 1x
+    let zoomIndex      = 0;
+    let noScanFrames   = 0;
+    const ZOOM_TRIGGER = 40; // frames ke baad zoom badha do (~2 sec at 20fps)
+
+    const useNative    = ('BarcodeDetector' in window);
+    let nativeDetector = null;
+    let zxingReader    = null;
+
+    async function initDetector() {
+      if (useNative) {
+        nativeDetector = new BarcodeDetector({
+          formats: ['ean_13','ean_8','code_128','code_39',
+                    'qr_code','upc_a','upc_e','data_matrix','itf','codabar']
+        });
+        document.getElementById('engine-badge').textContent = '⚡ Native Fast';
+        document.getElementById('engine-badge').style.color = '#00ff88';
+      } else {
+        const ZXing = window.ZXing;
+        const hints = new Map();
+        hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
+          ZXing.BarcodeFormat.EAN_13, ZXing.BarcodeFormat.EAN_8,
+          ZXing.BarcodeFormat.CODE_128, ZXing.BarcodeFormat.CODE_39,
+          ZXing.BarcodeFormat.QR_CODE, ZXing.BarcodeFormat.UPC_A,
+          ZXing.BarcodeFormat.UPC_E, ZXing.BarcodeFormat.DATA_MATRIX,
+        ]);
+        hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+        zxingReader = new ZXing.BrowserMultiFormatReader(hints);
+        document.getElementById('engine-badge').textContent = '🔄 ZXing';
+        document.getElementById('engine-badge').style.color = '#ffcc00';
+      }
+    }
+
+    // ── Auto Zoom ─────────────────────────────────────
+    async function applyZoom(zoomVal) {
+      if (!videoTrack) return;
+      try {
+        const caps = videoTrack.getCapabilities();
+        if (caps.zoom) {
+          const minZ = caps.zoom.min || 1;
+          const maxZ = caps.zoom.max || 4;
+          const z = Math.min(Math.max(zoomVal, minZ), maxZ);
+          await videoTrack.applyConstraints({ advanced: [{ zoom: z }] });
+          const badge = document.getElementById('zoom-badge');
+          badge.textContent = '🔍 Zoom: ' + z + 'x';
+          badge.classList.add('show');
+          clearTimeout(applyZoom._t);
+          applyZoom._t = setTimeout(() => badge.classList.remove('show'), 1500);
+        }
+      } catch(e) {}
+    }
+
+    function autoZoomStep() {
+      noScanFrames++;
+      if (noScanFrames >= ZOOM_TRIGGER) {
+        noScanFrames = 0;
+        zoomIndex = (zoomIndex + 1) % ZOOM_LEVELS.length;
+        applyZoom(ZOOM_LEVELS[zoomIndex]);
+      }
+    }
+
+    function resetZoom() {
+      noScanFrames = 0;
+      zoomIndex    = 0;
+      applyZoom(1);
+    }
+
+    // ── Torch ─────────────────────────────────────────
+    async function toggleTorch() {
+      if (!videoTrack) return;
+      try {
+        torchOn = !torchOn;
+        await videoTrack.applyConstraints({ advanced: [{ torch: torchOn }] });
+        const btn = document.getElementById('torch-btn');
+        btn.textContent = torchOn ? '🔦' : '🔦';
+        btn.classList.toggle('on', torchOn);
+      } catch(e) {
+        showStatus('warn', '⚠️ Torch support nahi hai is device mein');
+        torchOn = false;
+      }
+    }
+
+    // ── Camera Toggle ─────────────────────────────────
+    async function toggleCamera() {
+      if (stream) { stopCamera(); return; }
+      const btn = document.getElementById('camera-btn');
+      btn.textContent = '⏳ Camera shuru ho raha hai...';
+      btn.disabled = true;
+      try {
+        await initDetector();
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: { ideal: 'environment' },
+            width:  { ideal: 1920 },
+            height: { ideal: 1080 },
+          }
+        });
+        const video = document.getElementById('video');
+        video.srcObject = stream;
+        await video.play();
+
+        // Get video track for zoom + torch
+        videoTrack = stream.getVideoTracks()[0];
+
+        // Check torch support
+        try {
+          const caps = videoTrack.getCapabilities();
+          if (caps.torch) {
+            document.getElementById('torch-btn').classList.add('show');
+          }
+        } catch(e) {}
+
+        document.getElementById('camera-wrap').style.display = 'block';
+        btn.textContent = '🛑 Camera Band Karo';
+        btn.classList.add('off');
+        btn.disabled = false;
+        startScanning();
+      } catch (err) {
+        showStatus('error', '❌ Camera nahi khula: ' + err.message);
+        btn.textContent = '📷 Camera Kholo aur Scan Karo';
+        btn.disabled = false;
+      }
+    }
+
+    function stopCamera() {
+      scanning  = false;
+      waitingOK = false;
+      if (animFrameId) { cancelAnimationFrame(animFrameId); animFrameId = null; }
+      if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+      videoTrack = null; torchOn = false;
+      document.getElementById('video').srcObject = null;
+      document.getElementById('camera-wrap').style.display = 'none';
+      document.getElementById('confirm-overlay').classList.remove('show');
+      document.getElementById('torch-btn').classList.remove('show','on');
+      setFoundUI(false);
+      const btn = document.getElementById('camera-btn');
+      btn.textContent = '📷 Camera Kholo aur Scan Karo';
+      btn.classList.remove('off');
+      btn.disabled = false;
+    }
+
+    function setFoundUI(found) {
+      ['c-tl','c-tr','c-bl','c-br'].forEach(id =>
+        document.getElementById(id).classList.toggle('found', found));
+      document.getElementById('laser').classList.toggle('found', found);
+    }
+
+    function startScanning() {
+      scanning    = true;
+      waitingOK   = false;
+      pendingCode = '';
+      document.getElementById('confirm-overlay').classList.remove('show');
+      setFoundUI(false);
+      document.getElementById('scan-hint').style.display = 'block';
+      resetZoom();
+      if (useNative) scanNative();
+      else scanZXing();
+    }
+
+    // ── Native BarcodeDetector ────────────────────────
+    async function scanNative() {
+      if (!scanning || waitingOK || !stream) return;
+      const video = document.getElementById('video');
+      if (video.readyState < 2) {
+        animFrameId = requestAnimationFrame(scanNative);
+        return;
+      }
+      try {
+        const barcodes = await nativeDetector.detect(video);
+        if (barcodes.length > 0) {
+          resetZoom();
+          onBarcodeFound(barcodes[0].rawValue);
+          return;
+        } else {
+          autoZoomStep(); // koi barcode nahi mila — zoom badha
+        }
+      } catch(e) {}
+      animFrameId = requestAnimationFrame(scanNative);
+    }
+
+    // ── ZXing Fallback ────────────────────────────────
+    function scanZXing() {
+      if (!scanning || waitingOK || !stream) return;
+      const video  = document.getElementById('video');
+      const canvas = document.getElementById('canvas');
+      if (video.readyState < 2) { setTimeout(scanZXing, 100); return; }
+
+      canvas.width  = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(video, 0, 0);
+
+      try {
+        const ZXing  = window.ZXing;
+        const lum    = new ZXing.HTMLCanvasElementLuminanceSource(canvas);
+        const bitmap = new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(lum));
+        try {
+          const result = zxingReader.decodeBitmap(bitmap);
+          if (result && result.getText()) {
+            resetZoom();
+            onBarcodeFound(result.getText());
+            return;
+          } else {
+            autoZoomStep();
+          }
+        } catch(e) { autoZoomStep(); }
+      } catch(e) {}
+      setTimeout(scanZXing, 80);
+    }
+
+    // ── Barcode Found ─────────────────────────────────
+    function onBarcodeFound(code) {
+      waitingOK   = true;
+      pendingCode = code;
+      if (navigator.vibrate) navigator.vibrate([60, 40, 60]);
+      setFoundUI(true);
+      document.getElementById('scan-hint').style.display = 'none';
+      document.getElementById('confirm-code').textContent = code;
+      document.getElementById('confirm-overlay').classList.add('show');
+      document.getElementById('barcode-input').value = code;
+    }
+
+    async function confirmAndSend() {
+      const code = pendingCode;
+      const qty  = parseInt(document.getElementById('qty-input').value) || 1;
+      if (!code) return;
+      document.getElementById('confirm-overlay').classList.remove('show');
+      showStatus('sending', '⏳ Sheet mein bhej raha hai...');
+      await doSend(code, qty);
+      startScanning();
+    }
+
+    function retryCamera() {
+      document.getElementById('barcode-input').value = '';
+      startScanning();
+    }
+
+    async function sendManual() {
+      const code = document.getElementById('barcode-input').value.trim();
+      const qty  = parseInt(document.getElementById('qty-input').value) || 1;
+      if (!code) { showStatus('warn', '⚠️ Pehle barcode type karo!'); return; }
+      const btn = document.getElementById('send-btn');
+      btn.disabled = true;
+      showStatus('sending', '⏳ Bhej raha hai...');
+      await doSend(code, qty);
+      document.getElementById('barcode-input').value = '';
+      document.getElementById('qty-input').value = 1;
+      btn.disabled = false;
+    }
+
+    async function doSend(barcode, qty) {
+      const datetime = new Date().toLocaleString('en-IN', {
+        day: '2-digit', month: '2-digit', year: 'numeric',
+        hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true
+      });
+      try {
+        await fetch(APPS_SCRIPT_URL, {
+          method: 'POST', mode: 'no-cors',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ barcode, datetime, quantity: qty })
+        });
+        showStatus('success', '✅ Bheja: ' + barcode + '  (Qty: ' + qty + ')');
+        addLog(barcode, qty);
+      } catch (err) {
+        showStatus('error', '❌ Error: ' + err.message);
+      }
+    }
+
+    let stTimer = null;
+    function showStatus(type, msg) {
+      const pill = document.getElementById('status-pill');
+      pill.className = 'status-pill ' + type;
+      pill.textContent = msg;
+      pill.style.display = 'block';
+      clearTimeout(stTimer);
+      if (type !== 'sending') stTimer = setTimeout(() => { pill.style.display = 'none'; }, 3500);
+    }
+
+    function addLog(barcode, qty) {
+      logEntries.unshift({ barcode, qty });
+      if (logEntries.length > 30) logEntries.pop();
+      renderLog();
+    }
+    function clearLog() { logEntries.length = 0; renderLog(); }
+    function renderLog() {
+      const el = document.getElementById('log-list');
+      if (!logEntries.length) {
+        el.innerHTML = '<p class="log-empty">Abhi koi scan nahi hua</p>';
+        return;
+      }
+      el.innerHTML = logEntries.map(e =>
+        `<div class="log-item">
+          <span class="log-barcode">${esc(e.barcode)}</span>
+          <span class="log-meta">Qty: ${e.qty}</span>
+        </div>`
+      ).join('');
+    }
+    function esc(s) {
+      return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+  </script>
+</body>
+</html>
